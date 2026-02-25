@@ -1,0 +1,125 @@
+# ============================================================
+# Baseline MLB — Automated Data Pipeline
+# Runs on cron during MLB season (Mar 1 – Nov 15)
+# ============================================================
+
+name: MLB Data Pipelines
+
+on:
+  schedule:
+    # 8:00 AM ET = 13:00 UTC  — fetch schedule + rosters
+    - cron: "0 13 * * *"
+    # 10:30 AM ET = 15:30 UTC — morning props refresh
+    - cron: "30 15 * * *"
+    # 4:30 PM ET = 21:30 UTC  — afternoon/evening props refresh
+    - cron: "30 21 * * *"
+    # 2:00 AM ET = 07:00 UTC  — nightly Statcast ingest (after games complete)
+    - cron: "0 7 * * *"
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      pipeline:
+        description: "Which pipeline to run"
+        required: false
+        default: "all"
+        type: choice
+        options:
+          - all
+          - games
+          - players
+          - props
+          - statcast
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 8:00 AM — Games + Players (always run together)
+  # ─────────────────────────────────────────────────────────────
+  fetch-schedule:
+    name: Fetch Games + Players
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '0 13 * * *'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fetch_games.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python pipeline/fetch_games.py
+
+      - name: Run fetch_players.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python pipeline/fetch_players.py
+
+  # ─────────────────────────────────────────────────────────────
+  # 10:30 AM + 4:30 PM — Props (twice daily)
+  # ─────────────────────────────────────────────────────────────
+  fetch-props:
+    name: Fetch Props
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '30 15 * * *' ||
+      github.event.schedule == '30 21 * * *'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fetch_props.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ODDS_API_KEY:         ${{ secrets.ODDS_API_KEY }}
+        run: python pipeline/fetch_props.py
+
+  # ─────────────────────────────────────────────────────────────
+  # 2:00 AM — Statcast (nightly, after all games complete)
+  # ─────────────────────────────────────────────────────────────
+  fetch-statcast:
+    name: Fetch Statcast
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '0 7 * * *'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run fetch_statcast.py
+        env:
+          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python pipeline/fetch_statcast.py
