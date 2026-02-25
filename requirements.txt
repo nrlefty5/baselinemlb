@@ -1,0 +1,21 @@
+# BaselineMLB — Python dependencies
+# Install with: pip install -r requirements.txt
+
+# HTTP requests
+requests>=2.31.0
+
+# Data manipulation
+pandas>=2.0.0
+pyarrow>=14.0.0
+
+# MLB Statcast data
+pybaseball>=2.2.7
+
+# Scheduling / utilities
+python-dateutil>=2.8.2
+
+# Optional: for local development / Jupyter notebooks
+# jupyter>=1.0.0
+# matplotlib>=3.7.0
+# seaborn>=0.12.0
+# scikit-learn>=1.3.0
