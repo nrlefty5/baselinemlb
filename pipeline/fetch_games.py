@@ -15,9 +15,9 @@ if not all([SUPABASE_URL, SUPABASE_KEY]):
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── Config ───────────────────────────────────────────────────────────────────
-BASE_URL  = "https://statsapi.mlb.com/api/v1"
-SPORT_ID  = 1   # MLB
+# ── Config ────────────────────────────────────────────────────────────────────
+BASE_URL = "https://statsapi.mlb.com/api/v1"
+SPORT_ID = 1  # MLB
 
 
 def fetch_schedule(target_date: date, days_ahead: int = 6) -> list[dict]:
@@ -31,10 +31,10 @@ def fetch_schedule(target_date: date, days_ahead: int = 6) -> list[dict]:
 
     url = f"{BASE_URL}/schedule"
     params = {
-        "sportId":    SPORT_ID,
-        "startDate":  start,
-        "endDate":    end,
-        "hydrate":    "venue,probablePitcher,linescore,flags,decisions",
+        "sportId":   SPORT_ID,
+        "startDate": start,
+        "endDate":   end,
+        "hydrate":   "venue,probablePitcher,linescore,flags,decisions,game(content(summary))",
     }
     r = requests.get(url, params=params, timeout=15)
     r.raise_for_status()
@@ -51,19 +51,19 @@ def parse_game(game: dict) -> dict | None:
     """
     Map an MLB Stats API game object to our games table schema.
     Returns None if the game is missing essential fields.
+    Includes probable pitcher IDs and names.
     """
     game_pk = game.get("gamePk")
     if not game_pk:
         return None
 
     game_date_str = game.get("officialDate") or game.get("gameDate", "")[:10]
+    teams = game.get("teams", {})
+    home  = teams.get("home", {})
+    away  = teams.get("away", {})
 
-    teams     = game.get("teams", {})
-    home      = teams.get("home", {})
-    away      = teams.get("away", {})
     home_team = home.get("team", {}).get("name", "Unknown")
     away_team = away.get("team", {}).get("name", "Unknown")
-
     venue     = game.get("venue", {}).get("name")
     status    = game.get("status", {}).get("detailedState")
 
@@ -72,15 +72,32 @@ def parse_game(game: dict) -> dict | None:
     home_score = linescore.get("teams", {}).get("home", {}).get("runs")
     away_score = linescore.get("teams", {}).get("away", {}).get("runs")
 
+    # Probable pitchers (present once announced)
+    home_pp = home.get("probablePitcher", {})
+    away_pp = away.get("probablePitcher", {})
+    home_probable_pitcher_id   = home_pp.get("id")
+    home_probable_pitcher_name = home_pp.get("fullName")
+    away_probable_pitcher_id   = away_pp.get("id")
+    away_probable_pitcher_name = away_pp.get("fullName")
+
+    # Game time (UTC ISO string truncated to HH:MM)
+    game_time_raw = game.get("gameDate", "")
+    game_time = game_time_raw[11:16] if len(game_time_raw) >= 16 else None
+
     return {
-        "game_pk":    game_pk,
-        "game_date":  game_date_str,
-        "home_team":  home_team,
-        "away_team":  away_team,
-        "venue":      venue,
-        "status":     status,
-        "home_score": home_score,
-        "away_score": away_score,
+        "game_pk":                   game_pk,
+        "game_date":                 game_date_str,
+        "home_team":                 home_team,
+        "away_team":                 away_team,
+        "venue":                     venue,
+        "status":                    status,
+        "home_score":                home_score,
+        "away_score":                away_score,
+        "home_probable_pitcher_id":  home_probable_pitcher_id,
+        "home_probable_pitcher":     home_probable_pitcher_name,
+        "away_probable_pitcher_id":  away_probable_pitcher_id,
+        "away_probable_pitcher":     away_probable_pitcher_name,
+        "game_time":                 game_time,
     }
 
 
@@ -98,13 +115,13 @@ def upsert_games(rows: list[dict]) -> None:
 def main(days_ahead: int = 6):
     today = date.today()
     print(f"Fetching MLB schedule: {today} through {today + timedelta(days=days_ahead)} ...")
-
     raw_games = fetch_schedule(today, days_ahead=days_ahead)
     print(f"  API returned {len(raw_games)} raw games.")
-
     rows = [r for g in raw_games if (r := parse_game(g)) is not None]
     print(f"  Parsed {len(rows)} valid game rows.")
-
+    # Count how many have probable pitchers
+    with_pitchers = sum(1 for r in rows if r.get("home_probable_pitcher_id") or r.get("away_probable_pitcher_id"))
+    print(f"  {with_pitchers} games have at least one probable pitcher announced.")
     upsert_games(rows)
     print("Done.")
 
