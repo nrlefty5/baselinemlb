@@ -217,6 +217,37 @@ Go to **Actions** tab and check:
 
 ---
 
+---
+
+## Step 9: Deploy Frontend to Vercel
+
+Get a live public URL for the Next.js frontend.
+
+### Option A: One-Click via Vercel Dashboard (Recommended)
+
+1. Go to [vercel.com/new](https://vercel.com/new)
+2. Import your `nrlefty5/baselinemlb` GitHub repository
+3. Vercel will auto-detect the `vercel.json` and set `Root Directory: frontend`
+4. Add these **Environment Variables** in Vercel project settings:
+   - `NEXT_PUBLIC_SUPABASE_URL` = your Supabase project URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = your Supabase anon/public key
+5. Click **Deploy** — live in ~2 minutes
+
+### Option B: Auto-Deploy via GitHub Actions
+
+Once you have a Vercel project created (via Option A above), add these 3 secrets to GitHub:
+
+| Secret | Where to find it |
+|--------|------------------|
+| `VERCEL_TOKEN` | Vercel Dashboard → Settings → Tokens → Create |
+| `VERCEL_ORG_ID` | Vercel Dashboard → Settings → General → Team ID |
+| `VERCEL_PROJECT_ID` | Vercel project → Settings → General → Project ID |
+
+After adding secrets, every push to `main` that touches `frontend/` or `vercel.json` will auto-deploy to production.
+
+> 💡 **Your live URL** will be: `https://baselinemlb.vercel.app` (or similar)
+> Set a custom domain in Vercel Settings → Domains if you have `baselinemlb.com`
+
 ## 📚 Additional Resources
 
 - **Full Documentation:** [README.md](README.md)
