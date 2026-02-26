@@ -5,7 +5,6 @@ Fetches MLB player stats (hitting + pitching) for today's
 probable pitchers and active roster batters.
 Saves to data/players/players_YYYY-MM-DD.json
 """
-
 import os
 import json
 import requests
@@ -27,7 +26,10 @@ def fetch_player_stats(player_id: int, group: str = "hitting", season: int = Non
     resp = requests.get(url, params=params, timeout=30)
     resp.raise_for_status()
     data = resp.json()
-    splits = data.get("stats", [{}])[0].get("splits", [])
+    stats_list = data.get("stats", [])
+    if not stats_list:
+        return {}
+    splits = stats_list[0].get("splits", [])
     if splits:
         return splits[0].get("stat", {})
     return {}
@@ -93,13 +95,15 @@ if __name__ == "__main__":
     today = date.today().isoformat()
     pitcher_ids = load_today_pitcher_ids()
     print(f"Found {len(pitcher_ids)} probable pitchers for {today}")
-
     players = []
     for pid in pitcher_ids:
-        info = fetch_player_info(pid)
-        stats = fetch_player_stats(pid, group="pitching")
-        players.append({"info": info, "pitching_stats": stats})
-        print(f"  Fetched pitcher: {info.get('fullName', pid)}")
-
+        try:
+            info = fetch_player_info(pid)
+            stats = fetch_player_stats(pid, group="pitching")
+            players.append({"info": info, "pitching_stats": stats})
+            print(f"  Fetched pitcher: {info.get('fullName', pid)}")
+        except Exception as e:
+            print(f"  Warning: Could not fetch stats for player {pid}: {e}")
+            continue
     save_players(players, today)
     print("Done.")
