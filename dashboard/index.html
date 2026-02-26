@@ -31,6 +31,30 @@
       color: #a0aec0;
       font-weight: 400;
     }
+    .prelaunch-banner {
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      border-radius: 12px;
+      padding: 2rem;
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    .prelaunch-banner h2 {
+      font-size: 1.5rem;
+      color: #4ade80;
+      margin-bottom: 1rem;
+    }
+    .prelaunch-banner p {
+      color: #a0aec0;
+      line-height: 1.6;
+      margin-bottom: 0.5rem;
+    }
+    .prelaunch-banner .follow {
+      margin-top: 1rem;
+      font-size: 1rem;
+      color: #4ade80;
+      font-weight: 600;
+    }
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -43,11 +67,6 @@
       border-radius: 12px;
       padding: 1.5rem;
       border: 1px solid rgba(255,255,255,0.1);
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .stat-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
     }
     .stat-label {
       font-size: 0.875rem;
@@ -60,7 +79,7 @@
     .stat-value {
       font-size: 2.5rem;
       font-weight: 700;
-      color: #4ade80;
+      color: #718096;
       line-height: 1;
     }
     .stat-meta {
@@ -99,22 +118,12 @@
       padding: 0.875rem 1rem;
       border-bottom: 1px solid rgba(255,255,255,0.05);
       font-size: 0.95rem;
+      color: #718096;
     }
-    tr:hover {
-      background: rgba(255,255,255,0.03);
-    }
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.75rem;
-      border-radius: 9999px;
-      font-size: 0.875rem;
-      font-weight: 600;
-      background: rgba(74, 222, 128, 0.2);
-      color: #4ade80;
-    }
-    .badge.negative {
-      background: rgba(239, 68, 68, 0.2);
-      color: #ef4444;
+    .empty-row td {
+      text-align: center;
+      padding: 2rem;
+      font-style: italic;
     }
     footer {
       text-align: center;
@@ -139,26 +148,35 @@
       <p class="tagline">Glass-box prop analytics — public accuracy tracking</p>
     </header>
 
+    <div class="prelaunch-banner">
+      <h2>Tracking begins Opening Day 2026</h2>
+      <p>Total Picks Graded: 0</p>
+      <p>Hit Rate: —</p>
+      <p>CLV: —</p>
+      <p style="margin-top: 1rem;">Projections will be logged and graded publicly starting with the first game of the 2026 MLB season. Every pick, every factor, every result — tracked here in real time.</p>
+      <p class="follow">Follow @baselinemlb for daily analysis.</p>
+    </div>
+
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Overall Hit Rate</div>
-        <div class="stat-value">56.3%</div>
-        <div class="stat-meta">Last 30 days · 329 picks</div>
+        <div class="stat-value">—</div>
+        <div class="stat-meta">Tracking begins Opening Day 2026</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Season Hit Rate</div>
-        <div class="stat-value">54.8%</div>
-        <div class="stat-meta">2025 Season · 1,147 picks</div>
+        <div class="stat-value">—</div>
+        <div class="stat-meta">2026 Season · 0 picks</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">CLV (Closing Line Value)</div>
-        <div class="stat-value">+2.4%</div>
+        <div class="stat-value">—</div>
         <div class="stat-meta">Avg. line movement</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Highest Conf. Props</div>
-        <div class="stat-value">61.2%</div>
-        <div class="stat-meta">Confidence ≥ 65% · 89 picks</div>
+        <div class="stat-value">—</div>
+        <div class="stat-meta">Confidence &ge; 65% · 0 picks</div>
       </div>
     </div>
 
@@ -174,35 +192,8 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>Pitcher Strikeouts</td>
-            <td><span class="badge">58.9%</span></td>
-            <td>421</td>
-            <td>+3.1%</td>
-          </tr>
-          <tr>
-            <td>Batter Hits</td>
-            <td><span class="badge">55.2%</span></td>
-            <td>298</td>
-            <td>+1.8%</td>
-          </tr>
-          <tr>
-            <td>Batter Total Bases</td>
-            <td><span class="badge">53.7%</span></td>
-            <td>187</td>
-            <td>+2.3%</td>
-          </tr>
-          <tr>
-            <td>Pitcher Outs</td>
-            <td><span class="badge">56.4%</span></td>
-            <td>125</td>
-            <td>+2.9%</td>
-          </tr>
-          <tr>
-            <td>Batter Home Runs</td>
-            <td><span class="badge negative">49.1%</span></td>
-            <td>116</td>
-            <td>-0.4%</td>
+          <tr class="empty-row">
+            <td colspan="4">No data yet — tracking begins Opening Day 2026</td>
           </tr>
         </tbody>
       </table>
@@ -220,30 +211,15 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>FanDuel</td>
-            <td><span class="badge">57.3%</span></td>
-            <td>412</td>
-            <td>+2.8%</td>
-          </tr>
-          <tr>
-            <td>DraftKings</td>
-            <td><span class="badge">55.9%</span></td>
-            <td>389</td>
-            <td>+2.1%</td>
-          </tr>
-          <tr>
-            <td>BetMGM</td>
-            <td><span class="badge">54.2%</span></td>
-            <td>346</td>
-            <td>+1.9%</td>
+          <tr class="empty-row">
+            <td colspan="4">No data yet — tracking begins Opening Day 2026</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <footer>
-      <p>Data updated daily at 2 AM ET via GitHub Actions · <a href="https://github.com/nrlefty5/baselinemlb" target="_blank">View Source on GitHub</a></p>
+      <p>Data will update daily at 2 AM ET via GitHub Actions starting Opening Day 2026 &middot; <a href="https://github.com/nrlefty5/baselinemlb" target="_blank">View Source on GitHub</a></p>
       <p style="margin-top: 0.5rem;">Powered by Statcast, MLB Stats API, and The Odds API</p>
     </footer>
   </div>
