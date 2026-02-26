@@ -14,7 +14,7 @@ async function getProjections(gameDate?: string) {
     .from('projections')
     .select('*')
     .eq('game_date', today)
-    .order('confidence_score', { ascending: false })
+    .order('confidence', { ascending: false })
     .limit(150)
 
   if (error) {
@@ -25,14 +25,14 @@ async function getProjections(gameDate?: string) {
 }
 
 const STAT_LABELS: Record<string, string> = {
-  strikeouts: 'Strikeouts',
-  hits: 'Hits',
-  home_runs: 'Home Runs',
-  rbis: 'RBIs',
-  walks: 'Walks',
-  earned_runs: 'Earned Runs',
-  outs_recorded: 'Outs Recorded',
-  hits_allowed: 'Hits Allowed',
+  pitcher_strikeouts: 'Strikeouts',
+  batter_hits: 'Hits',
+  batter_home_runs: 'Home Runs',
+  batter_rbis: 'RBIs',
+  batter_walks: 'Walks',
+  pitcher_earned_runs: 'Earned Runs',
+  pitcher_outs: 'Outs Recorded',
+  pitcher_hits_allowed: 'Hits Allowed',
 }
 
 function ConfidenceBadge({ score }: { score: number }) {
@@ -51,12 +51,15 @@ function ConfidenceBadge({ score }: { score: number }) {
 
 function ProjectionCard({ proj }: { proj: any }) {
   const statLabel = STAT_LABELS[proj.stat_type] || proj.stat_type
-  const diff = proj.projected_value != null && proj.line != null
-    ? (proj.projected_value - proj.line).toFixed(2)
-    : null
-  const overUnder = diff !== null
-    ? parseFloat(diff) > 0 ? 'OVER' : parseFloat(diff) < 0 ? 'UNDER' : 'PUSH'
-    : null
+  // Schema uses 'projection' column name
+  const projValue = proj.projection
+  const conf = proj.confidence
+
+  // Parse features JSON for key factors
+  let features: any = {}
+  try {
+    features = typeof proj.features === 'string' ? JSON.parse(proj.features) : (proj.features || {})
+  } catch {}
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-gray-500 transition-colors">
@@ -64,55 +67,44 @@ function ProjectionCard({ proj }: { proj: any }) {
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-white truncate">{proj.player_name}</div>
           <div className="text-xs text-slate-500 mt-0.5">
-            {proj.team_abbr || ''} &bull; {statLabel}
+            {statLabel}
+            {features.venue && <span className="ml-1">&bull; {features.venue}</span>}
           </div>
         </div>
-        {proj.confidence_score != null && (
-          <ConfidenceBadge score={proj.confidence_score} />
-        )}
+        {conf != null && <ConfidenceBadge score={conf} />}
       </div>
 
-      <div className="flex items-center justify-between mt-2">
+      <div className="flex items-center justify-center gap-6 mt-3">
         <div className="text-center">
-          <div className="text-2xl font-bold text-white">
-            {proj.projected_value?.toFixed(1) ?? '--'}
+          <div className="text-3xl font-bold text-white">
+            {projValue != null ? projValue.toFixed(1) : '--'}
           </div>
-          <div className="text-xs text-slate-500">Projected</div>
+          <div className="text-xs text-slate-500 mt-1">Projected</div>
         </div>
-
-        <div className="text-center px-3">
-          <div className="text-slate-600 text-sm">vs</div>
-          <div className="text-xs text-slate-500">Line</div>
-        </div>
-
-        <div className="text-center">
-          <div className="text-2xl font-bold text-slate-400">
-            {proj.line?.toFixed(1) ?? '--'}
-          </div>
-          <div className="text-xs text-slate-500">Market</div>
-        </div>
-
-        {overUnder && diff !== null && (
-          <div className="text-center ml-2">
-            <div className={`text-sm font-bold ${
-              overUnder === 'OVER' ? 'text-green-400' :
-              overUnder === 'UNDER' ? 'text-red-400' :
-              'text-slate-400'
-            }`}>
-              {overUnder}
-            </div>
-            <div className={`text-xs ${
-              parseFloat(diff) > 0 ? 'text-green-500' : 'text-red-500'
-            }`}>
-              {parseFloat(diff) > 0 ? '+' : ''}{diff}
-            </div>
-          </div>
-        )}
       </div>
 
-      {proj.key_factors && (
-        <div className="mt-3 pt-3 border-t border-gray-700">
-          <p className="text-xs text-slate-400 line-clamp-2">{proj.key_factors}</p>
+      {features.baseline_k9 && (
+        <div className="mt-3 pt-3 border-t border-gray-700 grid grid-cols-2 gap-2 text-xs">
+          <div>
+            <span className="text-slate-500">K/9:</span>
+            <span className="text-slate-300 ml-1">{features.baseline_k9}</span>
+          </div>
+          <div>
+            <span className="text-slate-500">Park adj:</span>
+            <span className="text-slate-300 ml-1">{features.park_adjustment || '--'}</span>
+          </div>
+          {features.expected_innings && (
+            <div>
+              <span className="text-slate-500">Exp IP:</span>
+              <span className="text-slate-300 ml-1">{features.expected_innings}</span>
+            </div>
+          )}
+          {features.opponent && (
+            <div>
+              <span className="text-slate-500">vs:</span>
+              <span className="text-slate-300 ml-1">{features.opponent}</span>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -129,15 +121,15 @@ export default async function ProjectionsPage() {
     timeZone: 'America/New_York',
   })
 
-  const highConf = projections.filter((p: any) => p.confidence_score >= 0.7)
-  const other = projections.filter((p: any) => !p.confidence_score || p.confidence_score < 0.7)
+  const highConf = projections.filter((p: any) => p.confidence != null && p.confidence >= 0.7)
+  const other = projections.filter((p: any) => !p.confidence || p.confidence < 0.7)
 
   return (
     <div>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">Model Projections</h1>
         <p className="text-slate-400">
-          {today} &bull; Glass-box K-nearest model &bull; {projections.length} projections
+          {today} &bull; Glass-box K/9 model &bull; {projections.length} projections
         </p>
       </div>
 
@@ -148,16 +140,15 @@ export default async function ProjectionsPage() {
           <p className="text-slate-500 max-w-md mx-auto">
             {!supabaseUrl
               ? 'Configure Supabase environment variables to load projections.'
-              : 'Projections generate automatically starting Opening Day 2026 using our glass-box K-nearest neighbor model.'}
+              : 'Projections generate automatically starting Opening Day 2026 using our glass-box K/9 pitcher model.'}
           </p>
           <div className="mt-8 p-4 bg-gray-900 rounded-lg border border-gray-700 max-w-md mx-auto text-sm text-slate-400 text-left">
-            <p className="font-medium text-slate-300 mb-2">Model inputs:</p>
+            <p className="font-medium text-slate-300 mb-2">Model factors:</p>
             <ul className="space-y-1">
-              <li>• Season stats + Statcast exit velocity, launch angle</li>
-              <li>• Umpire framing tendencies</li>
-              <li>• Park factors (15 stadiums)</li>
-              <li>• Pitcher/batter historical matchups</li>
-              <li>• Rest days, travel, lineup position</li>
+              <li>• Career K/9 rate (MLB Stats API)</li>
+              <li>• Park K-factor adjustments (15 ballparks)</li>
+              <li>• Expected innings pitched</li>
+              <li>• Opponent lineup</li>
             </ul>
           </div>
         </div>
