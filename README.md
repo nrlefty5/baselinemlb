@@ -88,7 +88,7 @@ python scripts/fetch_statcast.py   # Pulls yesterday's Statcast data
 |---|---|
 | `ODDS_API_KEY` | From [the-odds-api.com](https://the-odds-api.com) |
 | `SUPABASE_URL` | Your Supabase project URL |
-| `SUPABASE_KEY` | Supabase service role key |
+| `SUPABASE_SERVICE_KEY` | Supabase service role key |
 
 ---
 
