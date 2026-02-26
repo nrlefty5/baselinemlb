@@ -1,125 +1,110 @@
-# ============================================================
-# Baseline MLB — Automated Data Pipeline
-# Runs on cron during MLB season (Mar 1 – Nov 15)
-# ============================================================
+# .github/workflows/pipelines.yml
+# Automated daily MLB data pipelines for Baseline MLB
 
 name: MLB Data Pipelines
 
 on:
   schedule:
-    # 8:00 AM ET = 13:00 UTC  — fetch schedule + rosters
-    - cron: "0 13 * * *"
-    # 10:30 AM ET = 15:30 UTC — morning props refresh
-    - cron: "30 15 * * *"
-    # 4:30 PM ET = 21:30 UTC  — afternoon/evening props refresh
-    - cron: "30 21 * * *"
-    # 2:00 AM ET = 07:00 UTC  — nightly Statcast ingest (after games complete)
-    - cron: "0 7 * * *"
-
-  # Allow manual trigger from GitHub Actions UI
+    # Morning: fetch schedule + rosters (8:00 AM ET = 12:00 UTC during EDT)
+    - cron: "0 12 * * *"
+    # Late morning: props refresh + generate projections (10:30 AM ET = 14:30 UTC)
+    - cron: "30 14 * * *"
+    # Afternoon: props refresh + update projections (4:30 PM ET = 20:30 UTC)
+    - cron: "30 20 * * *"
+    # Overnight: Statcast ingest + grade accuracy (2:00 AM ET = 06:00 UTC)
+    - cron: "0 6 * * *"
   workflow_dispatch:
-    inputs:
-      pipeline:
-        description: "Which pipeline to run"
-        required: false
-        default: "all"
-        type: choice
-        options:
-          - all
-          - games
-          - players
-          - props
-          - statcast
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
 
 jobs:
-  # ─────────────────────────────────────────────────────────────
-  # 8:00 AM — Games + Players (always run together)
-  # ─────────────────────────────────────────────────────────────
-  fetch-schedule:
-    name: Fetch Games + Players
+  # -- Morning Pipeline: Schedule + Rosters
+  fetch-games-players:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 12 * * *'
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '0 13 * * *'
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: pip
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run fetch_games.py
-        env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python pipeline/fetch_games.py
+      - name: Fetch games
+        run: python scripts/fetch_games.py
 
-      - name: Run fetch_players.py
-        env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python pipeline/fetch_players.py
+      - name: Fetch players
+        run: python scripts/fetch_players.py
 
-  # ─────────────────────────────────────────────────────────────
-  # 10:30 AM + 4:30 PM — Props (twice daily)
-  # ─────────────────────────────────────────────────────────────
-  fetch-props:
-    name: Fetch Props
+  # -- Late Morning Pipeline: Props + Projections
+  morning-props-projections:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 14 * * *'
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '30 15 * * *' ||
-      github.event.schedule == '30 21 * * *'
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: pip
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run fetch_props.py
-        env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          ODDS_API_KEY:         ${{ secrets.ODDS_API_KEY }}
-        run: python pipeline/fetch_props.py
+      - name: Fetch props
+        run: python scripts/fetch_props.py
 
-  # ─────────────────────────────────────────────────────────────
-  # 2:00 AM — Statcast (nightly, after all games complete)
-  # ─────────────────────────────────────────────────────────────
-  fetch-statcast:
-    name: Fetch Statcast
+      - name: Generate projections
+        run: python scripts/generate_projections.py
+
+  # -- Afternoon Pipeline: Props Refresh + Update Projections
+  afternoon-props-projections:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 20 * * *'
     runs-on: ubuntu-latest
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      github.event.schedule == '0 7 * * *'
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-          cache: pip
+          python-version: "3.11"
 
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run fetch_statcast.py
-        env:
-          SUPABASE_URL:         ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python pipeline/fetch_statcast.py
+      - name: Fetch props
+        run: python scripts/fetch_props.py
+
+      - name: Generate projections
+        run: python scripts/generate_projections.py
+
+  # -- Overnight Pipeline: Statcast + Grade Accuracy
+  overnight-statcast-grading:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch Statcast data
+        run: python scripts/fetch_statcast.py
+
+      - name: Grade yesterday's projections
+        run: python scripts/grade_accuracy.py
