@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Clients ───────────────────────────────────────────────────────────────────
+# ── Clients ─────────────────────────────────────────────────────────────────────────────
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
@@ -14,24 +14,25 @@ if not all([SUPABASE_URL, SUPABASE_KEY]):
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Config ─────────────────────────────────────────────────────────────────────────────
 BASE_URL = "https://statsapi.mlb.com/api/v1"
 SPORT_ID = 1   # MLB
 
 # Positions we care about for prop betting
 PROP_POSITIONS = {
-    "P", "SP", "RP",        # pitchers
-    "C",                    # catchers (framing)
-    "1B", "2B", "3B", "SS", # infield
-    "LF", "CF", "RF",       # outfield
-    "DH",                   # designated hitter
-    "OF", "IF",             # generic
+    "P", "SP", "RP",           # pitchers
+    "C",                       # catchers (framing)
+    "1B", "2B", "3B", "SS",   # infield
+    "LF", "CF", "RF",         # outfield
+    "DH",                      # designated hitter
+    "OF", "IF",                # generic
 }
 
 
 def fetch_active_rosters() -> list[dict]:
     """
     Pull the active 40-man roster for every MLB team.
+    Uses hydrate=person so batSide/pitchHand are included inline.
     Returns a flat list of player dicts from the Stats API.
     """
     # Get all MLB teams first
@@ -49,7 +50,10 @@ def fetch_active_rosters() -> list[dict]:
         try:
             rr = requests.get(
                 roster_url,
-                params={"rosterType": "40Man"},
+                params={
+                    "rosterType": "40Man",
+                    "hydrate": "person",   # <-- pulls batSide, pitchHand, birthDate, etc.
+                },
                 timeout=15,
             )
             rr.raise_for_status()
@@ -63,13 +67,25 @@ def fetch_active_rosters() -> list[dict]:
     return all_players
 
 
+def fetch_player_detail(mlbam_id: int) -> dict:
+    """
+    Fetch full bio for a single player to get bat/throw hand.
+    Only called as a fallback if the roster hydration lacks that data.
+    """
+    url = f"{BASE_URL}/people/{mlbam_id}"
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    people = r.json().get("people", [])
+    return people[0] if people else {}
+
+
 def parse_player(entry: dict) -> dict | None:
     """
     Map a roster entry to our players table schema.
     Returns None if mlbam_id is missing.
     """
-    person = entry.get("person", {})
-    mlbam_id = person.get("id")
+    person    = entry.get("person", {})
+    mlbam_id  = person.get("id")
     if not mlbam_id:
         return None
 
@@ -83,9 +99,18 @@ def parse_player(entry: dict) -> dict | None:
     if position and position not in PROP_POSITIONS:
         return None
 
-    # Bat/throw hand — available on deeper hydration, gracefully default
+    # Bat/throw hand — populated by hydrate=person on the roster call
     bat_side   = person.get("batSide",   {}).get("code")
     pitch_hand = person.get("pitchHand", {}).get("code")
+
+    # Fallback: individual player endpoint if hydration missed the data
+    if not bat_side or not pitch_hand:
+        try:
+            detail    = fetch_player_detail(mlbam_id)
+            bat_side   = bat_side   or detail.get("batSide",   {}).get("code")
+            pitch_hand = pitch_hand or detail.get("pitchHand", {}).get("code")
+        except Exception:
+            pass  # Non-fatal; we'll store NULL and fill on next run
 
     return {
         "mlbam_id":  mlbam_id,
@@ -96,18 +121,6 @@ def parse_player(entry: dict) -> dict | None:
         "throws":    pitch_hand,
         "active":    True,
     }
-
-
-def fetch_player_detail(mlbam_id: int) -> dict:
-    """
-    Fetch full bio for a single player to get bat/throw hand.
-    Only called if the roster entry lacks that data.
-    """
-    url = f"{BASE_URL}/people/{mlbam_id}"
-    r = requests.get(url, timeout=10)
-    r.raise_for_status()
-    people = r.json().get("people", [])
-    return people[0] if people else {}
 
 
 def upsert_players(rows: list[dict]) -> None:
@@ -123,12 +136,10 @@ def upsert_players(rows: list[dict]) -> None:
 
 def main():
     print("Fetching MLB active rosters ...")
-    raw = fetch_active_rosters()
+    raw  = fetch_active_rosters()
     print(f"  Total roster entries: {len(raw)}")
-
     rows = [r for entry in raw if (r := parse_player(entry)) is not None]
     print(f"  Parsed {len(rows)} prop-relevant players.")
-
     upsert_players(rows)
     print("Done.")
 
