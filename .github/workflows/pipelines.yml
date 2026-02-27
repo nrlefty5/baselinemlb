@@ -1,6 +1,5 @@
 # .github/workflows/pipelines.yml
 # Automated daily MLB data pipelines for Baseline MLB
-
 name: MLB Data Pipelines
 
 on:
@@ -40,8 +39,11 @@ jobs:
       - name: Fetch games
         run: python scripts/fetch_games.py
 
-      - name: Fetch players
+      - name: Fetch players (JSON cache)
         run: python scripts/fetch_players.py
+
+      - name: Upsert players to Supabase (with handedness)
+        run: python pipeline/fetch_players.py
 
   # -- Late Morning Pipeline: Props + Projections
   morning-props-projections:
@@ -93,7 +95,7 @@ jobs:
       - name: Generate batter projections
         run: python pipeline/generate_batter_projections.py
 
-  # -- Overnight Pipeline: Statcast + Grade Accuracy
+  # -- Overnight Pipeline: Statcast + Accuracy Grading
   overnight-statcast-grading:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 6 * * *'
     runs-on: ubuntu-latest
@@ -112,8 +114,8 @@ jobs:
       - name: Fetch Statcast data
         run: python scripts/fetch_statcast.py
 
-      - name: Grade yesterday's projections
+      - name: Grade accuracy
         run: python scripts/grade_accuracy.py
 
-      - name: Track CLV (Closing Line Value)
+      - name: Track CLV
         run: python scripts/track_clv.py
