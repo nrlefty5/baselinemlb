@@ -89,6 +89,7 @@ python scripts/fetch_statcast.py   # Pulls yesterday's Statcast data
 | `ODDS_API_KEY` | From [the-odds-api.com](https://the-odds-api.com) |
 | `SUPABASE_URL` | Your Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Supabase service role key |
+| `SUPABASE_ANON_KEY` | Supabase anon (public) key — used by dashboard/js/stats.js |
 
 ---
 
@@ -122,7 +123,7 @@ All of this is pulled nightly from Statcast via pybaseball and stored in `data/s
 
 ## Public Accuracy Dashboard
 
-Our prediction accuracy is tracked publicly at **[baselinemlb.com](https://baselinemlb.com)**.
+Our prediction accuracy is tracked publicly at **[baselinemlb.com](https://baselinemlb.com)**. (live at **[nrlefty5.github.io/baselinemlb](https://nrlefty5.github.io/baselinemlb/)**).
 
 Metrics shown:
 - Overall hit rate (past 30 days, season)
