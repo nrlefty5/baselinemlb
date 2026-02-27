@@ -36,9 +36,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("generate_batter_projections")
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 MODEL_VERSION = "v1.1-glass-box-tb-rampup"
+
+# Debug logging
+log.info(f"URL length: {len(SUPABASE_URL)}")
+log.info(f"URL starts with: {SUPABASE_URL[:8] if len(SUPABASE_URL) >= 8 else SUPABASE_URL}")
+log.info(f"URL ends with: {SUPABASE_URL[-5:] if len(SUPABASE_URL) >= 5 else SUPABASE_URL}")
 
 if not all([SUPABASE_URL, SUPABASE_KEY]):
     raise EnvironmentError("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY")
