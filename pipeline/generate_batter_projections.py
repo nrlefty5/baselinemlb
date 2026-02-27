@@ -201,8 +201,7 @@ def run_projections(game_date=None):
 
     games = sb_get("games", {
         "game_date": f"eq.{game_date}",
-        "select": "game_pk,game_date,home_team,away_team,venue,status,home_probable_pitcher_id,home_probable_pitcher,away_probable_pitcher_id,away_probable_pitcher"                  "home_probable_pitcher_id,home_probable_pitcher,",
-    })
+        "select": "game_pk,game_date,home_team,away_team,venue,status,home_probable_pitcher_id,home_probable_pitcher,away_probable_pitcher_id,away_probable_pitcher",    })
     log.info(f"Found {len(games)} games for {game_date}")
     if not games:
         log.info("No games found.")
