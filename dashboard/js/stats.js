@@ -1,24 +1,20 @@
 /**
- * stats.js -- BaselineMLB Public Accuracy Dashboard
+ * stats.js — BaselineMLB Public Accuracy Dashboard
  *
  * Fetches live accuracy and CLV metrics from Supabase using the anon key.
  * Populates stat cards, market table, and bookmaker table.
+ * Displays today's projections with player handedness.
  * Handles pre-season state gracefully when no data exists.
- *
- * Required Supabase tables (read-only via RLS):
- *   - accuracy_summary: overall hit rate, total picks, season stats
- *   - clv_tracking: closing line value per pick
- *   - picks: graded picks with market and bookmaker breakdown
  */
 
 // ---------------------------------------------------------------------------
-// Configuration -- replace these with your actual Supabase project values
+// Configuration — replace these with your actual Supabase project values
 // ---------------------------------------------------------------------------
 const SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
 const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE';
 
 // ---------------------------------------------------------------------------
-// Supabase REST helper (no SDK required -- plain fetch)
+// Supabase REST helper (no SDK required — plain fetch)
 // ---------------------------------------------------------------------------
 async function sbGet(table, params = {}) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
@@ -92,6 +88,45 @@ async function fetchDashboardStats() {
   }
 }
 
+// Fetch today's projections with player info (including handedness)
+async function fetchTodaysProjections() {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get today's projections
+    const projections = await sbGet('projections', {
+      select: 'mlbam_id,player_name,stat_type,projection,confidence',
+      'game_date': `eq.${today}`,
+      order: 'confidence.desc',
+      limit: 20,
+    });
+
+    if (!projections || projections.length === 0) return [];
+
+    // Get player details (including handedness) for all projected players
+    const playerIds = [...new Set(projections.map(p => p.mlbam_id))];
+    const players = await sbGet('players', {
+      select: 'mlbam_id,full_name,team,position,bats,throws',
+      'mlbam_id': `in.(${playerIds.join(',')})`,
+    });
+
+    // Create lookup map
+    const playerMap = {};
+    players.forEach(p => {
+      playerMap[p.mlbam_id] = p;
+    });
+
+    // Merge projections with player data
+    return projections.map(proj => ({
+      ...proj,
+      playerInfo: playerMap[proj.mlbam_id] || {}
+    }));
+  } catch (err) {
+    console.error('Failed to fetch today\'s projections:', err);
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -130,6 +165,12 @@ function formatCLV(clv) {
   return num >= 0 ? `+${num}%` : `${num}%`;
 }
 
+function formatHandedness(bats, throws) {
+  const b = bats || '?';
+  const t = throws || '?';
+  return `${b}/${t}`;
+}
+
 // ---------------------------------------------------------------------------
 // DOM population
 // ---------------------------------------------------------------------------
@@ -145,6 +186,10 @@ function showPrelaunchState() {
 
   renderEmptyTable('market-table-body', 4);
   renderEmptyTable('bookmaker-table-body', 4);
+  
+  // Hide projections section if no data
+  const projectionsSection = document.getElementById('projections-section');
+  if (projectionsSection) projectionsSection.style.display = 'none';
 }
 
 function renderEmptyTable(tbodyId, colspan) {
@@ -178,9 +223,7 @@ function populateDashboard(stats) {
 
   const highConfEl = document.getElementById('stat-high-conf');
   if (highConfEl) {
-    const highConfRate = stats.byMarket.length > 0
-      ? formatHitRate(stats.byMarket[0].hitRate)
-      : '—';
+    const highConfRate = stats.byMarket.length > 0 ? formatHitRate(stats.byMarket[0].hitRate) : '—';
     highConfEl.textContent = highConfRate;
   }
 
@@ -212,7 +255,7 @@ function renderMarketTable(byMarket, clvByMarket) {
     return `
       <tr>
         <td>${escapeHtml(row.name)}</td>
-        <td style="color: ${parseFloat(row.hitRate) >= 55 ? '#4ade80' : '#e0e6ed'}">${row.hitRate}%</td>
+        <td>${row.hitRate}%</td>
         <td>${row.total}</td>
         <td>${avgClv}</td>
       </tr>
@@ -232,11 +275,46 @@ function renderBookmakerTable(byBookmaker) {
   tbody.innerHTML = byBookmaker.map(row => `
     <tr>
       <td>${escapeHtml(row.name)}</td>
-      <td style="color: ${parseFloat(row.hitRate) >= 55 ? '#4ade80' : '#e0e6ed'}">${row.hitRate}%</td>
+      <td>${row.hitRate}%</td>
       <td>${row.total}</td>
       <td>—</td>
     </tr>
   `).join('');
+}
+
+function renderProjections(projections) {
+  const section = document.getElementById('projections-section');
+  const tbody = document.getElementById('projections-table-body');
+  
+  if (!tbody || !section) return;
+
+  if (!projections || projections.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+  
+  tbody.innerHTML = projections.map(proj => {
+    const p = proj.playerInfo || {};
+    const handedness = formatHandedness(p.bats, p.throws);
+    const conf = proj.confidence ? `${(proj.confidence * 100).toFixed(0)}%` : '—';
+    
+    return `
+      <tr>
+        <td>
+          <strong>${escapeHtml(proj.player_name || 'Unknown')}</strong>
+          <br>
+          <span style="font-size: 0.85rem; color: #a0aec0;">
+            ${escapeHtml(p.team || '')} · ${escapeHtml(p.position || '')} · ${handedness}
+          </span>
+        </td>
+        <td>${escapeHtml(proj.stat_type || '')}</td>
+        <td><strong>${proj.projection ? proj.projection.toFixed(1) : '—'}</strong></td>
+        <td>${conf}</td>
+      </tr>
+    `;
+  }).join('');
 }
 
 function escapeHtml(str) {
@@ -255,6 +333,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (el) el.textContent = '...';
   });
 
-  const stats = await fetchDashboardStats();
+  // Fetch all data in parallel
+  const [stats, projections] = await Promise.all([
+    fetchDashboardStats(),
+    fetchTodaysProjections()
+  ]);
+
   populateDashboard(stats);
+  renderProjections(projections);
 });
