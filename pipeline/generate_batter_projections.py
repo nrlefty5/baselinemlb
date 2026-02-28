@@ -208,7 +208,7 @@ def run_projections(game_date=None):
         return
 
     # Fetch all active players
-    players = sb_get("players", {"active": "eq.true", "select": "mlbam_id,full_name,team,games_played"})
+    players = sb_get("players", {"select": "mlbam_id,full_name,team,position"  # TODO: add active filter once column exists})
     log.info(f"Found {len(players)} active players")
 
     projection_rows = []
