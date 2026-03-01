@@ -130,6 +130,6 @@ jobs:
 
       - name: Track CLV
         run: python scripts/track_clv.py
-        
-        - name: Compute umpire framing composites
-          run: python pipeline/fetch_umpire_framing.py
+
+      - name: Compute umpire framing composites
+        run: python pipeline/fetch_umpire_framing.py
