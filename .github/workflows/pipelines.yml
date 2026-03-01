@@ -76,6 +76,9 @@ jobs:
 
       - name: Generate batter projections
         run: python pipeline/generate_batter_projections.py
+        
+        - name: Generate daily content
+          run: python scripts/generate_daily_content.py --format all --top 5
 
   # -- Afternoon Pipeline: Props Refresh + Update Projections
   afternoon-props-projections:
@@ -105,6 +108,9 @@ jobs:
 
       - name: Generate batter projections
         run: python pipeline/generate_batter_projections.py
+        
+        - name: Generate daily content
+          run: python scripts/generate_daily_content.py --format all --top 5
 
   # -- Overnight Pipeline: Statcast + Accuracy Grading
   overnight-statcast-grading:
