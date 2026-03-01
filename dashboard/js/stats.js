@@ -31,6 +31,30 @@ async function sbGet(table, params = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Static JSON fallback — reads from grade_accuracy.py exports
+// ---------------------------------------------------------------------------
+async function loadFromStaticJSON() {
+  try {
+    const res = await fetch('./data/accuracy_summary.json');
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
+async function updateLastUpdated(data) {
+  const el = document.getElementById('last-updated');
+  if (!el) return;
+  if (data && data.updated_at) {
+    const d = new Date(data.updated_at);
+    el.textContent = 'Last updated: ' + d.toLocaleString('en-US', { timeZone: 'America/New_York' }) + ' ET';
+  } else {
+    el.textContent = 'Data updates nightly at 2 AM ET';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Data fetching
 // ---------------------------------------------------------------------------
 async function fetchDashboardStats() {
@@ -340,5 +364,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   ]);
 
   populateDashboard(stats);
+  
+    // Also try static JSON for last-updated timestamp and fallback data
+    const staticData = await loadFromStaticJSON();
+    updateLastUpdated(staticData);
   renderProjections(projections);
 });
