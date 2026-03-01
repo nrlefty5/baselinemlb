@@ -1,8 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
-
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-
 async function getPlayers(position?: string) {
   if (!supabaseUrl || !supabaseAnonKey) {
     return []
@@ -11,14 +9,11 @@ async function getPlayers(position?: string) {
   let query = supabase
     .from('players')
     .select('*')
-    .eq('active', true)
     .order('full_name', { ascending: true })
-    .limit(500)
-
+    .limit(2000)
   if (position && position !== 'ALL') {
     query = query.eq('position', position)
   }
-
   const { data, error } = await query
   if (error) {
     console.error('Error fetching players:', error)
@@ -26,7 +21,6 @@ async function getPlayers(position?: string) {
   }
   return data || []
 }
-
 function PlayerCard({ player }: { player: any }) {
   // Schema: bats, throws, team, position, full_name, mlbam_id
   return (
@@ -55,25 +49,21 @@ function PlayerCard({ player }: { player: any }) {
     </div>
   )
 }
-
 export default async function PlayersPage() {
   const players = await getPlayers()
-
   const pitchers = players.filter((p: any) => ['SP', 'RP', 'P'].includes(p.position))
   const batters = players.filter((p: any) => !['SP', 'RP', 'P'].includes(p.position))
-
   return (
     <div>
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">Player Tracker</h1>
         <p className="text-slate-400">
-          40-man roster data updated daily. {players.length} players tracked.
+          40-man roster data updated daily. {players.length.toLocaleString()} players tracked.
         </p>
       </div>
-
       {players.length === 0 ? (
         <div className="text-center py-16">
-          <div className="text-4xl mb-4">⚾</div>
+          <div className="text-4xl mb-4">&#9918;</div>
           <h2 className="text-xl font-semibold text-slate-300 mb-2">No player data yet</h2>
           <p className="text-slate-500">
             {!supabaseUrl
@@ -96,7 +86,6 @@ export default async function PlayersPage() {
               </div>
             </section>
           )}
-
           {batters.length > 0 && (
             <section>
               <h2 className="text-xl font-semibold text-white mb-4 pb-2 border-b border-gray-700">
