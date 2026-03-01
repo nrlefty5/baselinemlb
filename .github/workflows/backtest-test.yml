@@ -13,4 +13,4 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python scripts/backtest_projections.py --start 2025-07-01 --end 2025-07-31 --dry-run
+              - run: python scripts/backtest_projections.py --start 2025-04-01 --end 2025-09-30 --dry-run
