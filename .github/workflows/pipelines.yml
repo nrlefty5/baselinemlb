@@ -38,9 +38,9 @@ jobs:
 
       - name: Fetch games
         run: python scripts/fetch_games.py
-        
-        - name: Upsert games to Supabase
-          run: python pipeline/fetch_games.py
+
+      - name: Upsert games to Supabase
+        run: python pipeline/fetch_games.py
 
       - name: Fetch players (JSON cache)
         run: python scripts/fetch_players.py
@@ -63,7 +63,7 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-        
+
       - name: Debug URL
         run: |
           echo "URL_LENGTH=${#SUPABASE_URL}" && echo "STARTS=$(echo $SUPABASE_URL | cut -c1-8)" && echo "ENDS=$(echo $SUPABASE_URL | tail -c 6)"
@@ -92,7 +92,7 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-        
+
       - name: Debug URL
         run: |
           echo "URL_LENGTH=${#SUPABASE_URL}" && echo "STARTS=$(echo $SUPABASE_URL | cut -c1-8)" && echo "ENDS=$(echo $SUPABASE_URL | tail -c 6)"
