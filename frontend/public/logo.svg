@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <circle cx="100" cy="100" r="95" fill="#0f172a" stroke="#3b82f6" stroke-width="4"/>
+  <path d="M 60 55 Q 85 75 60 100" stroke="#ef4444" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M 140 55 Q 115 75 140 100" stroke="#ef4444" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <text x="100" y="118" font-family="Georgia, serif" font-size="72" font-weight="bold" fill="#f8fafc" text-anchor="middle" letter-spacing="-4">BL</text>
+  <text x="100" y="158" font-family="Arial, sans-serif" font-size="14" fill="#94a3b8" text-anchor="middle" letter-spacing="3">MLB</text>
+  <line x1="50" y1="163" x2="150" y2="163" stroke="#3b82f6" stroke-width="1.5"/>
+</svg>
