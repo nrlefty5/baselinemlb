@@ -37,6 +37,7 @@ def parse_games(schedule: dict) -> list:
             games.append({
                 "game_pk": game["gamePk"],
                 "game_date": game["gameDate"],
+                                "game_time": game["gameDate"][11:16] if "T" in game.get("gameDate", "") else None,
                 "status": game["status"]["detailedState"],
                 "home_team": game["teams"]["home"]["team"]["name"],
                 "home_team_id": game["teams"]["home"]["team"]["id"],
