@@ -368,7 +368,7 @@ def fetch_weather(game_pk: int, venue_id: int) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.debug("game_weather lookup failed for game_pk=%d; trying legacy table.", game_pk)
 
-    # ── 2. Legacy weather table ───────────────────────────────────────────────
+    # ── 2. Legacy weather table ──────────────────────────────────────────────
     try:
         rows = _get("/weather", params={"game_pk": f"eq.{game_pk}", "select": "*"})
         if rows:
@@ -377,7 +377,7 @@ def fetch_weather(game_pk: int, venue_id: int) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         logger.debug("Legacy weather lookup failed for game_pk=%d.", game_pk)
 
-    # ── 3. Default fallback ───────────────────────────────────────────────────
+    # ── 3. Default fallback ──────────────────────────────────────────────────
     logger.warning("No weather data for game_pk=%d; using defaults.", game_pk)
     return _DEFAULTS
 
