@@ -5,10 +5,11 @@ Fetches today's MLB game schedule from the MLB Stats API
 and saves it to data/games/games_YYYY-MM-DD.json
 """
 
-import os
 import json
-import requests
+import os
 from datetime import date
+
+import requests
 
 BASE_URL = "https://statsapi.mlb.com/api/v1"
 

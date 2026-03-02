@@ -6,11 +6,12 @@ and upserts games into the same Supabase `games` table as MLB games.
 Designed to run daily during WBC (March 5 - March 22, 2026).
 Uses Option A: separate script, same games table, no changes to existing pipeline scripts.
 """
-import os
 import json
 import logging
-import requests
+import os
 from datetime import date
+
+import requests
 
 logging.basicConfig(
     level=logging.INFO,

@@ -8,10 +8,11 @@ Saves to data/props/props_YYYY-MM-DD.json
 Requires env var: ODDS_API_KEY
 """
 
-import os
 import json
-import requests
+import os
 from datetime import date
+
+import requests
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 SPORT = "baseball_mlb"

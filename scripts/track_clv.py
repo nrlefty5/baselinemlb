@@ -12,11 +12,11 @@ FIXED: Updated field names to match actual props table schema:
 - source (not bookmaker)
 """
 
-import os
 import logging
+import os
 from datetime import datetime, timedelta
-from typing import Optional
-from supabase import create_client, Client
+
+from supabase import Client, create_client
 
 logging.basicConfig(
     level=logging.INFO,
