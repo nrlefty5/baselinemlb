@@ -33,19 +33,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import matplotlib
+
 matplotlib.use("Agg")  # non-interactive backend — must come before pyplot import
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-import matplotlib.ticker as mticker
-import matplotlib.table as mtable
 import numpy as np
 import seaborn as sns
 
@@ -236,7 +233,6 @@ def _make_demo_predictions(n: int = 600, seed: int = 42) -> List[Dict]:
 
 def _make_demo_summary(predictions: List[Dict]) -> Dict:
     """Build a summary object from a list of predictions."""
-    from collections import defaultdict
 
     acc_by_type: Dict[str, Any] = defaultdict(lambda: {
         "count": 0, "mae_sum": 0.0, "errors": [], "within_1": 0, "within_2": 0,
