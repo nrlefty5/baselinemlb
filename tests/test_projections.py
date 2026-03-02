@@ -17,14 +17,14 @@ Tests cover:
 """
 
 import json
-import pytest
-from unittest.mock import patch, MagicMock
-
 
 # ---------------------------------------------------------------------------
 # We need to mock environment variables before importing the modules
 # ---------------------------------------------------------------------------
 import os
+
+import pytest
+
 os.environ["SUPABASE_URL"] = "https://test-project.supabase.co"
 os.environ["SUPABASE_SERVICE_KEY"] = "test-key-12345"
 
@@ -76,7 +76,6 @@ class TestPitcherProjectionMath:
 
     def test_recent_form_blending_career_only(self):
         """When recent data is unavailable, should use career K/9 only."""
-        from pipeline.generate_projections import CAREER_WEIGHT, RECENT_FORM_WEIGHT
 
         career_k9 = 8.5
         # When recent_k9 is None, blended should just be career
@@ -316,8 +315,8 @@ class TestEdgeCases:
 
     def test_model_version_strings(self):
         """Model version strings should be set."""
-        from pipeline.generate_projections import MODEL_VERSION as PITCHER_VERSION
         from pipeline.generate_batter_projections import MODEL_VERSION as BATTER_VERSION
+        from pipeline.generate_projections import MODEL_VERSION as PITCHER_VERSION
 
         assert "v2.0" in PITCHER_VERSION
         assert "v2.0" in BATTER_VERSION

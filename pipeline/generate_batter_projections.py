@@ -11,12 +11,13 @@ Model factors (v2.0):
 
 Total Bases (TB) = 1B + 2x2B + 3x3B + 4xHR
 """
-import os
 import json
 import logging
-import requests
+import os
 from datetime import date
-from typing import Optional
+
+import requests
+
 # from dotenv import load_dotenv  # DISABLED - GitHub Actions provides env vars
 
 # load_dotenv()
@@ -333,7 +334,7 @@ def run_projections(game_date=None):
 
     log.info(f"Generated {len(projection_rows)} batter TB projections")
     sb_upsert("projections", projection_rows)
-    log.info(f"=== Done ===")
+    log.info("=== Done ===")
 
 
 if __name__ == "__main__":
