@@ -900,3 +900,359 @@ if __name__ == "__main__":
     logger.info("Fetched %d props; use calculate_prop_edges() with a SimulationSummary.", len(props))
     print(f"Loaded {len(props)} props for {args.date}. "
           "Pipe a SimulationSummary in to compute edges.")
+
+
+# ===========================================================================
+# PROP CALCULATOR COMPATIBILITY LAYER
+# ===========================================================================
+# New interfaces expected by test_simulator.py
+# ===========================================================================
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .monte_carlo_engine import PlayerSimResults, GameSimResults
+
+
+def remove_vig(over_odds: int, under_odds: int) -> tuple[float, float]:
+    """Remove vig and return fair (over_prob, under_prob).
+
+    Wrapper around ``no_vig_probabilities`` with the name tests expect.
+    """
+    return no_vig_probabilities(over_odds, under_odds)
+
+
+# ---------------------------------------------------------------------------
+# New PropLine  (tests use mlbam_id instead of player_id/prop_id)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PropLine:  # type: ignore[no-redef]
+    """Sportsbook prop line — new interface used by tests.
+
+    Attributes
+    ----------
+    mlbam_id : int
+        MLB Advanced Media player ID.
+    player_name : str
+        Display name.
+    stat_type : str
+        E.g. ``"K"``, ``"H"``, ``"TB"``.
+    line : float
+        The over/under number.
+    over_odds : int
+        American odds for the OVER (default -110).
+    under_odds : int
+        American odds for the UNDER (default -110).
+    """
+    mlbam_id: int
+    player_name: str
+    stat_type: str
+    line: float
+    over_odds: int = -110
+    under_odds: int = -110
+
+
+# ---------------------------------------------------------------------------
+# New PropEdge  (tests use .direction, .edge, .confidence_tier, etc.)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class PropEdge:  # type: ignore[no-redef]
+    """Analysed prop line — new interface used by tests.
+
+    Attributes
+    ----------
+    mlbam_id : int
+    player_name : str
+    stat_type : str
+    line : float
+    direction : str
+        ``"OVER"`` or ``"UNDER"``.
+    edge : float
+        Signed edge (positive = value exists).
+    sim_prob : float
+        Simulated probability for the chosen direction.
+    fair_prob : float
+        No-vig implied probability.
+    kelly_stake : float
+        Recommended wager (dollar amount if bankroll provided, else fraction).
+    confidence_score : float
+        Bootstrap confidence in [0, 1].
+    confidence_tier : str
+        ``"A"`` (>= 0.7), ``"B"`` (>= 0.4), or ``"C"`` otherwise.
+    """
+    mlbam_id: int
+    player_name: str
+    stat_type: str
+    line: float
+    direction: str
+    edge: float
+    sim_prob: float
+    fair_prob: float
+    kelly_stake: float
+    confidence_score: float
+    confidence_tier: str
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serialisable dict."""
+        return {
+            "mlbam_id": self.mlbam_id,
+            "player_name": self.player_name,
+            "stat_type": self.stat_type,
+            "line": self.line,
+            "direction": self.direction,
+            "edge": self.edge,
+            "sim_prob": self.sim_prob,
+            "fair_prob": self.fair_prob,
+            "kelly_stake": self.kelly_stake,
+            "confidence_score": self.confidence_score,
+            "confidence_tier": self.confidence_tier,
+        }
+
+
+# Stat alias map: test uses short stat keys
+_NEW_STAT_ALIASES: dict[str, str] = {
+    "K": "strikeouts",
+    "H": "hits",
+    "TB": "total_bases",
+    "HR": "home_runs",
+    "BB": "walks",
+    "R": "runs",
+    "RBI": "rbis",
+    "PA": "plate_appearances",
+    "strikeouts": "strikeouts",
+    "hits": "hits",
+    "total_bases": "total_bases",
+    "home_runs": "home_runs",
+    "walks": "walks",
+    "runs": "runs",
+    "rbis": "rbis",
+    "plate_appearances": "plate_appearances",
+}
+
+
+# ---------------------------------------------------------------------------
+# New PropCalculator
+# ---------------------------------------------------------------------------
+
+class PropCalculator:  # type: ignore[no-redef]
+    """Calculate sportsbook prop edges against simulation distributions.
+
+    Parameters
+    ----------
+    bankroll : float
+        Total bankroll for Kelly sizing (dollar amount).
+    kelly_fraction : float
+        Fractional Kelly multiplier (default 0.25).
+    max_kelly_pct : float
+        Cap on Kelly fraction (default 0.05 = 5%).
+    min_edge : float
+        Minimum absolute edge to include (default 0.0).
+    n_bootstrap : int
+        Bootstrap resamples for confidence (default 200).
+    """
+
+    MAX_KELLY_CAP: float = 50.0  # max dollar stake regardless of bankroll
+
+    def __init__(
+        self,
+        bankroll: float = 1000.0,
+        kelly_fraction: float = 0.25,
+        max_kelly_pct: float = 0.05,
+        min_edge: float = 0.03,
+        n_bootstrap: int = 200,
+    ) -> None:
+        self.bankroll = bankroll
+        self.kelly_fraction = kelly_fraction
+        self.max_kelly_pct = max_kelly_pct
+        self.min_edge = min_edge
+        self.n_bootstrap = n_bootstrap
+
+    # ------------------------------------------------------------------
+    # Core evaluation
+    # ------------------------------------------------------------------
+
+    def evaluate_prop(
+        self,
+        player_sim: "PlayerSimResults",
+        prop: "PropLine",
+    ) -> "PropEdge | None":
+        """Evaluate a single prop line against a player's simulation results.
+
+        Returns ``None`` if the stat type is unknown.
+        """
+        stat_key = _NEW_STAT_ALIASES.get(prop.stat_type)
+        if stat_key is None:
+            return None
+
+        try:
+            arr = player_sim.distribution(prop.stat_type)
+        except KeyError:
+            return None
+
+        over_p = float(np.mean(arr > prop.line))
+        under_p = float(np.mean(arr < prop.line))
+
+        fair_over, fair_under = no_vig_probabilities(prop.over_odds, prop.under_odds)
+
+        over_edge = over_p - fair_over
+        under_edge = under_p - fair_under
+
+        if over_edge >= under_edge:
+            direction = "OVER"
+            edge = over_edge
+            sim_p = over_p
+            fair_p = fair_over
+            odds = prop.over_odds
+        else:
+            direction = "UNDER"
+            edge = under_edge
+            sim_p = under_p
+            fair_p = fair_under
+            odds = prop.under_odds
+
+        dec_odds = american_to_decimal(odds)
+        kf = kelly_fraction(
+            edge=edge,
+            decimal_odds=dec_odds,
+            multiplier=self.kelly_fraction,
+            cap=self.max_kelly_pct,
+        )
+        stake = min(float(kf * self.bankroll), self.MAX_KELLY_CAP)
+
+        conf = bootstrap_confidence(
+            arr, prop.line,
+            direction.lower(),
+            self.n_bootstrap,
+        )
+        if conf >= 0.7:
+            tier = "A"
+        elif conf >= 0.4:
+            tier = "B"
+        else:
+            tier = "C"
+
+        return PropEdge(
+            mlbam_id=prop.mlbam_id,
+            player_name=prop.player_name,
+            stat_type=prop.stat_type,
+            line=prop.line,
+            direction=direction,
+            edge=round(edge, 4),
+            sim_prob=round(sim_p, 4),
+            fair_prob=round(fair_p, 4),
+            kelly_stake=round(stake, 2),
+            confidence_score=round(conf, 4),
+            confidence_tier=tier,
+        )
+
+    def evaluate_props(
+        self,
+        game_results: "GameSimResults",
+        props: list["PropLine"],
+        pitcher_k_dist: "np.ndarray | None" = None,
+        pitcher_mlbam_id: int | None = None,
+        pitcher_name: str | None = None,
+    ) -> list["PropEdge"]:
+        """Evaluate a list of prop lines against game simulation results.
+
+        Optionally includes a pitcher K prop from ``pitcher_k_dist``.
+
+        Returns edges sorted by absolute edge descending.
+        """
+        from .monte_carlo_engine import PlayerSimResults as _PSR, N_OUTCOMES, MLB_AVG_PROBS
+
+        edges: list[PropEdge] = []
+
+        # Build a lookup of pitcher PlayerSimResults if provided
+        if pitcher_k_dist is not None and pitcher_mlbam_id is not None:
+            # Wrap pitcher K array into a PlayerSimResults-like object
+            n = len(pitcher_k_dist)
+            zeros = np.zeros(n, dtype=np.int32)
+            pitcher_pr = _PSR(
+                mlbam_id=pitcher_mlbam_id,
+                name=pitcher_name or "Pitcher",
+                n_sims=n,
+                strikeouts=pitcher_k_dist.astype(np.int32),
+                hits=zeros, total_bases=zeros, home_runs=zeros,
+                walks=zeros, runs=zeros, rbis=zeros, plate_appearances=zeros,
+            )
+        else:
+            pitcher_pr = None
+
+        for prop in props:
+            # Look for player in batter results first
+            player_sim = game_results.player_results.get(prop.mlbam_id)
+
+            # Fall back to pitcher profile if mlbam_id matches pitcher
+            if player_sim is None and pitcher_pr is not None:
+                if prop.mlbam_id == pitcher_mlbam_id:
+                    player_sim = pitcher_pr
+
+            if player_sim is None:
+                continue
+
+            edge = self.evaluate_prop(player_sim, prop)
+            if edge is not None:
+                edges.append(edge)
+
+        edges.sort(key=lambda e: abs(e.edge), reverse=True)
+        return edges
+
+    def kelly_criterion(
+        self,
+        win_prob: float,
+        decimal_odds: float,
+    ) -> float:
+        """Compute fractional Kelly stake (dollar amount).
+
+        Returns 0.0 if Kelly is non-positive.
+        """
+        if decimal_odds <= 1.0:
+            return 0.0
+        b = decimal_odds - 1.0
+        q = 1.0 - win_prob
+        full_kelly = (b * win_prob - q) / b
+        if full_kelly <= 0:
+            return 0.0
+        stake = min(full_kelly * self.kelly_fraction * self.bankroll, self.MAX_KELLY_CAP)
+        return float(stake)
+
+    def expected_value(self, win_prob: float, decimal_odds: float) -> float:
+        """Return expected value per unit staked: win_prob * (odds-1) - loss_prob."""
+        return win_prob * (decimal_odds - 1.0) - (1.0 - win_prob)
+
+    def filter_edges(
+        self,
+        edges: list["PropEdge"],
+        min_edge: float = 0.03,
+    ) -> list["PropEdge"]:
+        """Return only edges with |edge| >= *min_edge*."""
+        return [e for e in edges if abs(e.edge) >= min_edge]
+
+    def top_plays(
+        self,
+        edges: list["PropEdge"],
+        n: int = 5,
+        direction: str | None = None,
+    ) -> list["PropEdge"]:
+        """Return top *n* plays, optionally filtered by direction."""
+        filtered = edges
+        if direction is not None:
+            filtered = [e for e in edges if e.direction == direction]
+        return filtered[:n]
+
+    def format_summary(self, edges: list["PropEdge"]) -> str:
+        """Return a plain-text summary of the top edges."""
+        if not edges:
+            return "BaselineMLB — No edges found.\n"
+        sep = "-" * 60
+        lines = [sep, "  BaselineMLB Prop Edge Summary", sep]
+        for i, e in enumerate(edges, 1):
+            lines.append(
+                f"#{i:2d} {e.player_name:20s}  {e.stat_type:4s} {e.direction:5s} "
+                f"{e.line:5.1f}  edge={e.edge*100:+.1f}%  "
+                f"kelly=${e.kelly_stake:.2f}  tier={e.confidence_tier}"
+            )
+        lines.append(sep)
+        return "\n".join(lines)
