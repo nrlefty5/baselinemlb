@@ -326,7 +326,10 @@ def _try_real_import() -> tuple[Any, Any, Any]:
         matchup_cls = _StubMatchupModel
 
     try:
-        from simulator.monte_carlo_engine import GameSimulator, SimulationConfig  # type: ignore
+        from simulator.monte_carlo_engine import (  # type: ignore
+            GameSimulator,
+            SimulationConfig,
+        )
         sim_cls = GameSimulator
         logger.info("Imported real GameSimulator")
     except ImportError:
