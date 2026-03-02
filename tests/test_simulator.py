@@ -13,7 +13,6 @@ Run:
 import json
 import os
 import sys
-import time
 
 import numpy as np
 import pytest
@@ -821,10 +820,17 @@ class TestRunDailyHelpers:
         profile = build_batter_profile(
             mlbam_id=12345,
             name="Test Batter",
-            lineup_position=3,
-            k_rate=0.22,
-            bb_rate=0.09,
-            hr_rate=0.04,
+            position=3,
+            stats={
+                "plateAppearances": 500,
+                "strikeOuts": 110,
+                "baseOnBalls": 45,
+                "hitByPitch": 5,
+                "hits": 140,
+                "doubles": 30,
+                "triples": 3,
+                "homeRuns": 20,
+            },
         )
         assert profile.mlbam_id == 12345
         assert np.isclose(profile.probs.sum(), 1.0, atol=1e-6)
@@ -833,7 +839,8 @@ class TestRunDailyHelpers:
         profile = build_batter_profile(
             mlbam_id=99999,
             name="Unknown",
-            lineup_position=9,
+            position=9,
+            stats={},
         )
         assert np.isclose(profile.probs.sum(), 1.0, atol=1e-6)
 
@@ -891,8 +898,8 @@ class TestIntegration:
         assert len(filtered) >= 0
 
         # Top plays
-        top_over = calc.top_plays(edges, n=3, direction="OVER")
-        top_under = calc.top_plays(edges, n=3, direction="UNDER")
+        calc.top_plays(edges, n=3, direction="OVER")
+        calc.top_plays(edges, n=3, direction="UNDER")
 
         # Summary
         summary = calc.format_summary(edges[:5])

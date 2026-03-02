@@ -788,7 +788,7 @@ class TestGameState:
         gs.runners[2] = 2
         gs.runners[3] = 3
         initial_score = gs.score["away"]
-        runs = gs.advance_runners_probabilistic("single", rng)
+        gs.advance_runners_probabilistic("single", rng)
         # Should have scored some runners; total score should increase
         assert gs.score["away"] >= initial_score
         # Bases should be in a valid state
@@ -1284,8 +1284,7 @@ class TestPropAnalyzer:
 
     def test_confidence_tiers(self):
         """Confidence tiers: HIGH ≥ 0.08, MEDIUM ≥ 0.05, LOW ≥ EV_THRESHOLD, PASS < EV_THRESHOLD."""
-        config = SimulationConfig()
-        ev_threshold = config.EV_THRESHOLD  # 0.03
+        SimulationConfig()
 
         # Helper: build a SimulationResult whose p_over gives a specific edge
         def _result_for_p_over(p_over_target: float, player_id: int) -> SimulationResult:
