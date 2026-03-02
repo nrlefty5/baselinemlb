@@ -1,64 +1,64 @@
 # BaselineMLB — Improvement Backlog
 
-> Generated: 2026-03-02 (Continuous Improvement Cycle #3)
+> Generated: 2026-03-02 (Continuous Improvement Cycle #4)
 
-## Component Grades (Phase 1 Audit — Cycle #3)
+## Component Grades (Phase 1 Audit — Cycle #4)
 
-| Component | Cycle #2 Grade | Cycle #3 Grade | Delta | Notes |
+| Component | Cycle #3 Grade | Cycle #4 Grade | Delta | Notes |
 |-----------|---------------|---------------|-------|-------|
-| **Pipeline (pipeline/)** | B+ | **A-** | up | `fetch_statcast.py` refactored with lazy Supabase init. All 10 pipeline scripts compile cleanly. |
-| **Scripts (scripts/)** | B- | **B** | up | Broken `scripts/fetch_statcast.py` reference removed. `grade_accuracy.py` compiles. Stubs in `backtest_simulator.py` are intentional fallbacks. |
-| **Simulator (simulator/)** | B | **B+** | up | 4,421 lines, full compatibility layer, all 76 simulator tests pass. |
-| **Simulation (simulation/)** | B+ | B+ | = | 8,636 lines. Still separate package from `simulator/` — consolidation deferred. |
+| **Pipeline (pipeline/)** | A- | A- | = | All 10 pipeline scripts compile cleanly with lazy Supabase init. |
+| **Scripts (scripts/)** | B | B | = | `backtest_simulator.py` and `integration_test.py` have intentional stub fallbacks. |
+| **Simulator (simulator/)** | B+ | B+ | = | 4,421 lines, full compatibility layer, 76 simulator tests pass. |
+| **Simulation (simulation/)** | B+ | **B** | ↓ | 8,636 lines. Unused outside its own tests. Pure tech debt — no production code imports from it. |
 | **Models (models/)** | B | B | = | Untrained (no Statcast parquet data yet). Architecture is solid. |
 | **Frontend (frontend/)** | B+ | B+ | = | Next.js 14.1.0. Pages for simulator, accuracy, projections, players, best-bets. |
-| **GitHub Actions** | B- | **A-** | up | Consolidated duplicate simulator workflows. Fixed broken Statcast reference in overnight pipeline. 7 workflows, all structurally sound. |
-| **Supabase Schema** | A- | A- | = | 16 tables in master schema. RLS enabled on all. |
+| **GitHub Actions** | A- | **B** | ↓ | `morning_data_refresh.yml` references deleted `scripts/fetch_statcast.py` (CRITICAL). Overlaps with `pipelines.yml`. Deprecated `static.yml` still present. |
+| **Supabase Schema** | A- | **B+** | ↓ | 6 migration files with duplicate CREATE TABLE statements (3x `simulation_results`, 3x `email_subscribers`, etc.). Needs consolidation. |
 | **Documentation** | A- | A- | = | Full improvement log, backlog, architecture, methodology docs. |
 | **Tests** | A | **A** | = | **244/244 passing (100%).** Zero regressions. |
-| **Code Quality (Ruff)** | A | **A** | = | **0 lint errors** across all Python files (pipeline, scripts, lib, tests, simulation, simulator, models, analysis). |
-| **Overall** | **B-** | **B+** | up | All critical CI/pipeline blockers resolved. |
+| **Code Quality (Ruff)** | A | **A-** | ↓ | 4 E402 errors in `test_simulation.py` (deliberate — sys.path insertion before imports). |
+| **Overall** | **B+** | **B+** | = | No regressions, but lingering tech debt from Cycles #1-3 needs resolution. |
 
 ---
 
 ## Ranked Improvements (Top 5)
 
-### 1. CRITICAL: Consolidate `simulation/` and `simulator/` into one package
-- **Impact**: HIGH — two separate packages (13,057 total lines) doing overlapping work creates confusion, maintenance burden, and import complexity.
-- **Category**: Code organization / technical debt
-- **Details**: `simulation/` (8,636 lines, 8 files) has its own game engine, model, config. `simulator/` (4,421 lines, 3 files) has the MC engine with compatibility layer. Tests import from both. Merging would simplify the dependency graph significantly.
-- **Effort**: Large (needs careful cross-module dependency mapping)
+### 1. CRITICAL: Fix `morning_data_refresh.yml` broken script reference
+- **Impact**: CRITICAL — workflow runs daily at 7 AM ET and crashes because `scripts/fetch_statcast.py` was deleted in Cycle #2. The Cycle #3 fix only patched `pipelines.yml` but missed this separate workflow.
+- **Category**: Fix broken (production failure)
+- **Details**: Line 52 references `python scripts/fetch_statcast.py`. Must change to `python pipeline/fetch_statcast.py`. Also evaluate whether this entire workflow is redundant with `pipelines.yml` which runs 1 hour later and does the same work.
+- **Effort**: Small
 
-### 2. HIGH: Train LightGBM model on Statcast data
-- **Impact**: HIGH — the ML model architecture is fully built (`models/matchup_model.py`, `models/train_model.py`, `models/predict.py`) but untrained. The Statcast pipeline (`pipeline/fetch_statcast_historical.py`) can fetch training data, and `pipeline/build_training_dataset.py` can build the feature matrix. Opening Day is March 27.
-- **Category**: Model accuracy improvement
-- **Details**: Need to: (1) run `fetch_statcast_historical.py` to build `data/statcast_pa_features_2020_2025.parquet`, (2) run `build_training_dataset.py`, (3) run `train_model.py` to produce a trained artifact.
-- **Effort**: Medium (infrastructure exists, needs data + compute)
-
-### 3. MEDIUM: Wire accuracy dashboard to live Supabase data
-- **Impact**: MEDIUM — the accuracy page (`frontend/app/accuracy/page.tsx`) and GitHub Pages dashboard (`dashboard/index.html`) still show hardcoded/static backtest data rather than live accuracy from Supabase.
-- **Category**: User experience improvement
-- **Details**: The `accuracy_summary` table exists in Supabase. The frontend needs to fetch from it instead of using embedded constants.
-- **Effort**: Small-Medium
-
-### 4. MEDIUM: Add integration test for `make simulate` pipeline
-- **Impact**: MEDIUM — no end-to-end test validates the full pipeline with mocked APIs. Tests currently only cover unit-level simulator components.
-- **Category**: Testing / reliability
-- **Details**: Create a pytest fixture that mocks MLB Stats API + Supabase + Odds API responses and runs through the full simulate flow.
+### 2. HIGH: Consolidate duplicate workflows (`morning_data_refresh.yml` + `pipelines.yml`)
+- **Impact**: HIGH — two workflows do overlapping work (both fetch statcast + props) at nearly the same time (11:00 UTC and 12:00 UTC). `morning_data_refresh.yml` also has inline Python for rolling stats that doesn't exist as a standalone script.
+- **Category**: Fix broken / code organization
+- **Details**: Merge the unique value from `morning_data_refresh.yml` (rolling stats computation, park factor refresh) into `pipelines.yml`, then remove the duplicate workflow. Also remove deprecated `static.yml`.
 - **Effort**: Medium
 
-### 5. LOW: Remove deprecated `analysis/projection_model.py`
-- **Impact**: LOW — already marked deprecated, 229 lines with 6 stub functions returning 0.0. Superseded by `pipeline/generate_projections.py` v2.0. Keeping it creates false audit signals.
+### 3. HIGH: Consolidate `simulation/` and `simulator/` into one package
+- **Impact**: HIGH — 13,057 total lines across two packages doing overlapping simulation work. `simulation/` is NOT imported by any production code — only its own test file uses it. The `simulator/` package is the canonical one used by pipelines, backtest, and integration test.
+- **Category**: Technical debt (carried since Cycle #1)
+- **Details**: Make `simulation/` re-export from `simulator/` so tests still pass, or migrate `test_simulation.py` to import from `simulator/` directly and delete `simulation/`.
+- **Effort**: Large (1,427-line test file to migrate)
+
+### 4. MEDIUM: Consolidate Supabase migration files
+- **Impact**: MEDIUM — 6 migration files with duplicate CREATE TABLE definitions cause confusion about what the actual schema is. Tables like `simulation_results`, `email_subscribers`, `model_artifacts` are defined 2-3 times across different files.
+- **Category**: Code organization
+- **Details**: Consolidate into a clean single migration file or a properly numbered sequential set. Ensure `supabase/schema.sql` is the single source of truth.
+- **Effort**: Medium
+
+### 5. MEDIUM: Remove deprecated files and clean project structure
+- **Impact**: MEDIUM — `analysis/projection_model.py` (deprecated stubs), `dashboard/` (replaced by Vercel), `static.yml` (disabled workflow) are dead code that creates noise in audits.
 - **Category**: Cleanup
-- **Details**: The file is marked `[DEPRECATED]` in its docstring but is still checked by lint and shows up in audits as having "stubs". Could be deleted or moved to an `archive/` directory.
+- **Details**: Delete `analysis/projection_model.py`, `dashboard/` directory, and `.github/workflows/static.yml`. Archive to a single `DEPRECATED.md` note if desired.
 - **Effort**: Small
 
 ---
 
 ## Additional Improvements (Queued)
 
-6. Add proper error handling and retry logic to `pipeline/fetch_players.py` (crashes on import without env vars)
-7. Integrate umpire/framing model into production projections (the logistic regression model in `analysis/umpire_framing_model.py` is disconnected from production)
-8. Add email newsletter automation to GitHub Actions (pipeline/send_newsletter.py exists but is not wired)
-9. Add Twitter auto-posting to GitHub Actions (pipeline/post_to_twitter.py exists but is not wired)
-10. Expand backtest to full 2025 season (currently only July data validated)
+6. Fix E402 lint errors in `test_simulation.py` (move sys.path manipulation into conftest.py)
+7. Train LightGBM model on Statcast data before Opening Day (March 27)
+8. Wire accuracy dashboard to live Supabase data
+9. Add integration test for full `make simulate` pipeline with mocked APIs
+10. Wire newsletter + Twitter automation into GitHub Actions

@@ -254,3 +254,94 @@
 2. **LightGBM training** — critical path item before Opening Day (March 27). Fetch Statcast data, build training dataset, train model.
 3. **Live accuracy dashboard** — wire frontend to Supabase `accuracy_summary` table for real-time accuracy tracking.
 4. **Integration test** — end-to-end test for `make simulate` with mocked external APIs.
+
+---
+
+## Cycle #4 — 2026-03-02
+
+### Audited
+- Full codebase re-audit of all 50 Python files across 5 workflow files
+- Python import resolution for 14 core modules (all resolve cleanly)
+- Ruff lint check: **4 E402 errors** pre-fix (deliberate sys.path in test files), **0 errors** post-fix
+- Pytest execution: **244/244 passing (100%)** — zero regressions
+- GitHub Actions workflow audit: identified `morning_data_refresh.yml` referencing deleted `scripts/fetch_statcast.py` (CRITICAL — missed in Cycle #3)
+- Supabase migration audit: 6 migration files with duplicate table definitions
+- Deprecated file scan: `analysis/projection_model.py`, `dashboard/index.html`, `static.yml`
+- Cross-package dependency mapping: confirmed `simulation/` is unused by production code (only tests)
+
+### Component Grades
+| Component | Cycle #3 Grade | Cycle #4 Grade | Delta |
+|-----------|---------------|---------------|-------|
+| Pipeline (pipeline/) | A- | **A** | ↑ |
+| Scripts (scripts/) | B | B | = |
+| Simulator (simulator/) | B+ | B+ | = |
+| Simulation (simulation/) | B+ | B (legacy) | ↓ |
+| Models (models/) | B | B | = |
+| Frontend (frontend/) | B+ | B+ | = |
+| GitHub Actions | A- | **A** | ↑ |
+| Supabase Schema | B+ | **A** | ↑ |
+| Documentation | A- | **A** | ↑ |
+| Tests | A | **A+** | ↑ |
+| Code Quality (Ruff) | A- | **A+** | ↑ |
+| **Overall** | **B+** | **A-** | ↑ |
+
+### Fixed
+
+1. **`morning_data_refresh.yml` references deleted `scripts/fetch_statcast.py`** (CRITICAL)
+   - This workflow ran daily at 7 AM ET and immediately crashed because `scripts/fetch_statcast.py` was deleted in Cycle #2
+   - Cycle #3 fixed the same issue in `pipelines.yml` but missed this entirely separate workflow
+   - Fix: Merged all unique functionality from `morning_data_refresh.yml` into `pipelines.yml` and deleted the redundant workflow
+   - Impact: Pre-market data refresh pipeline unblocked
+
+2. **Duplicate workflows eliminated** (HIGH)
+   - `morning_data_refresh.yml` and `pipelines.yml` both fetched Statcast data and props at nearly the same time (11:00 UTC vs 12:00 UTC)
+   - `static.yml` (GitHub Pages dashboard deploy) was disabled but still present in the repo
+   - Fix: Extracted inline rolling stats computation into `pipeline/compute_rolling_stats.py` (128 lines), merged into `pipelines.yml` as a new `pre-market-refresh` job, deleted both `morning_data_refresh.yml` and `static.yml`
+   - Impact: Reduced from 8 workflows to 5. No more duplicate runs. Clean separation of concerns.
+
+3. **4 Ruff E402 lint errors in test files** (MEDIUM)
+   - `test_simulation.py` and `test_simulator.py` had `sys.path` manipulation before imports, causing E402 violations
+   - Fix: Created `tests/conftest.py` to handle path setup centrally, removed inline `sys.path` manipulation from both test files
+   - Impact: **0 lint errors** across entire codebase (was 4)
+
+4. **Supabase schema incomplete — 4 tables missing from master** (MEDIUM)
+   - `sim_results`, `sim_prop_edges`, `lineups`, and `weather` tables existed in migration files but were not in `supabase/schema.sql`
+   - Fix: Added all 4 tables (with indexes, RLS, and service-role write policies) to the master schema. Now 20 tables total.
+   - Consolidated 6 migration files into `archive/` directory, added `migrations/README.md`
+   - Impact: Single source of truth for database schema
+
+5. **Deprecated files cleaned up** (LOW)
+   - Deleted `analysis/projection_model.py` (228 lines of stub functions returning 0.0, superseded by `pipeline/generate_projections.py`)
+   - Deleted `dashboard/index.html` and `dashboard/js/stats.js` (replaced by Vercel-hosted frontend)
+   - Kept `dashboard/data/` directory (still used by backtest scripts)
+   - Added deprecation notice to `simulation/__init__.py` documenting legacy status and migration plan
+   - Impact: Cleaner codebase, no more false positive audit signals from stubs
+
+### Improved
+- Lint errors: **0** (down from 4 E402)
+- Workflow count: **5** (down from 8 — removed 3 redundant/deprecated)
+- Schema tables documented: **20** (up from 16 in master schema)
+- New script: `pipeline/compute_rolling_stats.py` (extracted from inline YAML Python)
+- New file: `tests/conftest.py` (centralized test path configuration)
+- Overall grade: **A-** (up from B+)
+
+### Commits
+1. `fix: merge morning_data_refresh.yml into pipelines.yml, extract compute_rolling_stats.py` — Critical fix for deleted script reference + workflow consolidation
+2. `cleanup: remove deprecated static.yml, analysis/projection_model.py, dashboard HTML` — Dead code removal
+3. `schema: add 4 missing tables to master schema, archive migrations` — Supabase consolidation
+4. `fix: resolve E402 lint errors — add conftest.py, remove inline sys.path` — Zero lint errors achieved
+5. `docs: update IMPROVEMENT_BACKLOG.md and IMPROVEMENT_LOG.md for Cycle #4` — Documentation
+6. `docs: mark simulation/ as legacy in __init__.py` — Package relationship documented
+
+### Still Pending
+1. Consolidate `simulation/` and `simulator/` into one canonical package (carried since Cycle #1 — requires migrating 1,427-line test file)
+2. Train LightGBM model on Statcast data before Opening Day (March 27)
+3. Wire accuracy dashboard to live Supabase data
+4. Add integration test for full `make simulate` pipeline with mocked APIs
+5. Wire newsletter + Twitter automation into GitHub Actions
+
+### Next Cycle Should Focus On
+1. **LightGBM model training** — highest business impact, critical path for Opening Day (March 27). Fetch Statcast data, build training dataset, train model.
+2. **Simulation package consolidation** — migrate `test_simulation.py` to test against `simulator/` and archive `simulation/`. Most complex tech debt item remaining.
+3. **Live accuracy dashboard** — wire frontend `accuracy/page.tsx` to Supabase `accuracy_summary` table.
+4. **Integration testing** — add end-to-end test for `make simulate` with mocked external APIs.
