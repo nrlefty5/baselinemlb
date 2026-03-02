@@ -1,10 +1,11 @@
 import os
-import sys
+from datetime import date, timedelta
+
 import pandas as pd
 import pybaseball as pb
-from datetime import date, timedelta
-from supabase import create_client, Client
 from dotenv import load_dotenv
+
+from supabase import Client, create_client
 
 load_dotenv()
 
@@ -42,7 +43,7 @@ def fetch_catcher_framing(season: int) -> pd.DataFrame:
         return df[available_cols]
     except Exception as e:
         print(f"  Warning: Could not fetch catcher framing for {season}: {e}")
-        print(f"  This is expected before the season starts. Skipping.")
+        print("  This is expected before the season starts. Skipping.")
         return pd.DataFrame()
 
 
@@ -62,7 +63,7 @@ def fetch_umpire_data(start_date: str, end_date: str) -> pd.DataFrame:
         # Keep only pitches with umpire and zone data
         df = df.dropna(subset=["umpire", "zone", "type"])
         if df.empty:
-            print(f"  No valid pitch data found. Skipping umpire analysis.")
+            print("  No valid pitch data found. Skipping umpire analysis.")
             return pd.DataFrame()
 
         # 'type' = 'S' (strike), 'B' (ball), 'X' (in play)
@@ -88,7 +89,7 @@ def fetch_umpire_data(start_date: str, end_date: str) -> pd.DataFrame:
         return ump_stats
     except Exception as e:
         print(f"  Warning: Could not fetch Statcast umpire data: {e}")
-        print(f"  This is expected before the season starts. Skipping.")
+        print("  This is expected before the season starts. Skipping.")
         return pd.DataFrame()
 
 

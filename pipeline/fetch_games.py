@@ -1,7 +1,10 @@
 import os
-import requests
 from datetime import date, timedelta
-from supabase import create_client, Client
+
+import requests
+
+from supabase import Client, create_client
+
 # from dotenv import load_dotenv  # DISABLED - GitHub Actions provides env vars
 
 # load_dotenv()
@@ -12,7 +15,7 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "").strip()
 
 # Fail fast with a clear error instead of cryptic HTTP 400
 if not SUPABASE_URL.startswith("https://") or not SUPABASE_URL.endswith(".supabase.co"):
-    raise RuntimeError(f"Invalid SUPABASE_URL (length={len(SUPABASE_URL)}, repr={repr(SUPABASE_URL[:30])})")  
+    raise RuntimeError(f"Invalid SUPABASE_URL (length={len(SUPABASE_URL)}, repr={repr(SUPABASE_URL[:30])})")
 
 if not all([SUPABASE_URL, SUPABASE_KEY]):
     raise EnvironmentError("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY in .env")

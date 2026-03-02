@@ -8,11 +8,11 @@ Populates the `umpire_framing` table in Supabase with:
 Runs nightly in the overnight-statcast-grading pipeline job.
 """
 import os
-import sys
 from datetime import date, timedelta
 
 import pandas as pd
-from supabase import create_client, Client
+
+from supabase import Client, create_client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
