@@ -16,12 +16,12 @@ Usage:
   python pipeline/send_newsletter.py --dry-run  # Preview without sending
 """
 
-import os
 import json
 import logging
-import requests
+import os
 from datetime import date
-from typing import Optional
+
+import requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -138,147 +138,151 @@ def build_email_html(best_bets: list, game_date: str) -> str:
     if not best_bets:
         return f"""
         <html>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0a0e1a; color: #e2e8f0; padding: 20px;">
-        <div style="max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #60a5fa;">Baseline MLB</h1>
-            <p>No strong plays found for {date_display}. Check back tomorrow.</p>
-            <p style="color: #64748b; font-size: 12px;">
-                <a href="{SITE_URL}" style="color: #60a5fa;">View full projections</a>
-            </p>
-        </div>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f8f9fa; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px;">
+                <h1 style="color: #1a1a2e;">Baseline MLB — {date_display}</h1>
+                <p>No strong plays today. The model confidence is below our threshold across all available markets.</p>
+                <p>Check back tomorrow!</p>
+                <p><a href="{SITE_URL}/projections">View all projections →</a></p>
+            </div>
         </body>
         </html>
         """
 
-    rows_html = ""
+    cards = []
     for bet in best_bets:
         stat_label = STAT_LABELS.get(bet["stat_type"], bet["stat_type"])
-        edge_color = "#4ade80" if bet["edge"] > 0 else "#f87171"
-        dir_color = "#4ade80" if bet["direction"] == "OVER" else "#f87171"
+        edge_color = "#16a34a" if bet["edge"] > 0 else "#dc2626"
+        direction_bg = "#dcfce7" if bet["direction"] == "OVER" else "#fee2e2"
+        direction_color = "#15803d" if bet["direction"] == "OVER" else "#b91c1c"
 
-        rows_html += f"""
-        <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #1e293b;">
-                <strong style="color: white;">{bet['player_name']}</strong>
-                <br><span style="color: #94a3b8; font-size: 12px;">{stat_label} &bull; {bet.get('venue', '')}</span>
-            </td>
-            <td style="padding: 12px; border-bottom: 1px solid #1e293b; text-align: center;">
-                <strong style="color: {dir_color};">{bet['direction']}</strong>
-            </td>
-            <td style="padding: 12px; border-bottom: 1px solid #1e293b; text-align: center; color: white;">
-                {bet['projection']:.1f}
-            </td>
-            <td style="padding: 12px; border-bottom: 1px solid #1e293b; text-align: center; color: #94a3b8;">
-                {bet.get('line', '--')}
-            </td>
-            <td style="padding: 12px; border-bottom: 1px solid #1e293b; text-align: center;">
-                <strong style="color: {edge_color};">{'+' if bet['edge'] > 0 else ''}{bet['edge']:.1f}%</strong>
-            </td>
-            <td style="padding: 12px; border-bottom: 1px solid #1e293b; text-align: center; color: #60a5fa;">
-                {round(bet['confidence'] * 100)}%
-            </td>
-        </tr>
+        card = f"""
+        <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin: 0; color: #1a1a2e; font-size: 18px;">{bet['player_name']}</h3>
+                <span style="background: {direction_bg}; color: {direction_color}; padding: 4px 12px;
+                    border-radius: 20px; font-weight: bold; font-size: 14px;">
+                    {bet['direction']} {bet.get('line', '?')} {stat_label}
+                </span>
+            </div>
+            <div style="margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">
+                <div>
+                    <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Projection</div>
+                    <div style="font-size: 20px; font-weight: bold; color: #1a1a2e;">{bet['projection']:.1f}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Edge</div>
+                    <div style="font-size: 20px; font-weight: bold; color: {edge_color};">{'+' if bet['edge'] > 0 else ''}{bet['edge']:.1f}%</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: #6b7280; text-transform: uppercase;">Confidence</div>
+                    <div style="font-size: 20px; font-weight: bold; color: #1a1a2e;">{round(bet['confidence'] * 100)}%</div>
+                </div>
+            </div>
+            {f'<p style="margin-top: 12px; font-size: 13px; color: #6b7280;">{bet["venue"]} vs {bet["opponent"]}</p>' if bet.get('venue') else ''}
+        </div>
         """
+        cards.append(card)
+
+    cards_html = "\n".join(cards)
 
     return f"""
+    <!DOCTYPE html>
     <html>
-    <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0a0e1a; color: #e2e8f0; padding: 20px;">
-    <div style="max-width: 700px; margin: 0 auto;">
-        <div style="text-align: center; margin-bottom: 24px;">
-            <h1 style="color: #60a5fa; margin: 0;">BASELINE <span style="color: white;">MLB</span></h1>
-            <p style="color: #94a3b8; margin: 4px 0;">Daily Best Bets &bull; {date_display}</p>
+    <head><meta charset="UTF-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; padding: 20px; margin: 0;">
+        <div style="max-width: 600px; margin: 0 auto;">
+            <!-- Header -->
+            <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+                <h1 style="margin: 0; color: white; font-size: 28px; font-weight: 800;">Baseline MLB</h1>
+                <p style="margin: 8px 0 0; color: #94a3b8; font-size: 16px;">{date_display} Best Bets</p>
+            </div>
+
+            <!-- Content -->
+            <div style="background: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <p style="color: #374151; font-size: 16px; margin-top: 0;">
+                    Here are today's top <strong>{len(best_bets)} plays</strong> from our glass-box model.
+                    All projections are generated transparently — every factor logged, every result graded.
+                </p>
+
+                {cards_html}
+
+                <!-- CTA -->
+                <div style="margin-top: 24px; padding: 20px; background: #f0f9ff; border-radius: 8px; text-align: center;">
+                    <p style="margin: 0 0 12px; color: #374151;">View full analysis and historical accuracy:</p>
+                    <a href="{SITE_URL}/best-bets" style="display: inline-block; background: #2563eb; color: white; padding: 12px 24px;
+                        border-radius: 6px; text-decoration: none; font-weight: bold; margin: 4px;">
+                        📊 Today's Best Bets
+                    </a>
+                    <a href="{SITE_URL}/accuracy" style="display: inline-block; background: #16a34a; color: white; padding: 12px 24px;
+                        border-radius: 6px; text-decoration: none; font-weight: bold; margin: 4px;">
+                        📈 Model Accuracy
+                    </a>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div style="padding: 20px; text-align: center; color: #9ca3af; font-size: 12px;">
+                <p>Baseline MLB &bull; Glass-box player prop model</p>
+                <p>Questions? Reply to this email.</p>
+                <p><a href="{SITE_URL}/unsubscribe" style="color: #9ca3af;">Unsubscribe</a></p>
+            </div>
         </div>
-
-        <table style="width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden;">
-        <thead>
-            <tr style="background: #0f172a;">
-                <th style="padding: 8px 12px; text-align: left; color: #94a3b8; font-size: 11px; text-transform: uppercase;">Player</th>
-                <th style="padding: 8px 12px; text-align: center; color: #94a3b8; font-size: 11px; text-transform: uppercase;">Pick</th>
-                <th style="padding: 8px 12px; text-align: center; color: #94a3b8; font-size: 11px; text-transform: uppercase;">Proj</th>
-                <th style="padding: 8px 12px; text-align: center; color: #94a3b8; font-size: 11px; text-transform: uppercase;">Line</th>
-                <th style="padding: 8px 12px; text-align: center; color: #94a3b8; font-size: 11px; text-transform: uppercase;">Edge</th>
-                <th style="padding: 8px 12px; text-align: center; color: #94a3b8; font-size: 11px; text-transform: uppercase;">Conf</th>
-            </tr>
-        </thead>
-        <tbody>
-            {rows_html}
-        </tbody>
-        </table>
-
-        <div style="text-align: center; margin-top: 24px;">
-            <a href="{SITE_URL}/best-bets" style="display: inline-block; padding: 10px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">
-                View Full Analysis
-            </a>
-        </div>
-
-        <p style="color: #475569; font-size: 11px; text-align: center; margin-top: 24px;">
-            Baseline MLB &bull; Glass-box analytics &bull; For informational use only
-            <br>
-            <a href="{SITE_URL}/unsubscribe" style="color: #475569;">Unsubscribe</a>
-        </p>
-    </div>
     </body>
     </html>
     """
 
 
 def send_email(to_email: str, subject: str, html_body: str) -> bool:
-    """Send an email via Resend API."""
+    """Send a single email via Resend API."""
     if not RESEND_API_KEY:
         log.warning("RESEND_API_KEY not set. Skipping email send.")
         return False
 
-    try:
-        r = requests.post(
-            "https://api.resend.com/emails",
-            headers={
-                "Authorization": f"Bearer {RESEND_API_KEY}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "from": FROM_EMAIL,
-                "to": [to_email],
-                "subject": subject,
-                "html": html_body,
-            },
-            timeout=15,
-        )
-        if r.ok:
-            log.info(f"  Sent email to {to_email}")
-            return True
-        else:
-            log.warning(f"  Failed to send to {to_email}: {r.status_code} {r.text[:200]}")
-            return False
-    except Exception as e:
-        log.warning(f"  Email send error for {to_email}: {e}")
-        return False
+    r = requests.post(
+        "https://api.resend.com/emails",
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+        },
+    )
+    if r.status_code == 200:
+        return True
+    log.warning(f"  Resend error {r.status_code}: {r.text[:200]}")
+    return False
 
 
 def main(dry_run=False):
     game_date = date.today().isoformat()
+    date_display = date.today().strftime("%b %d")
     log.info(f"=== Baseline MLB Newsletter for {game_date} ===")
 
     subscribers = fetch_subscribers()
     log.info(f"Found {len(subscribers)} active subscribers")
 
-    if not subscribers:
+    if not subscribers and not dry_run:
         log.info("No subscribers. Exiting.")
         return
 
     best_bets = fetch_best_bets(game_date)
-    log.info(f"Found {len(best_bets)} best bets for today")
-
-    subject = f"Baseline MLB Best Bets - {date.today().strftime('%B %d')}"
-    if best_bets:
-        top_bet = best_bets[0]
-        subject = f"{top_bet['player_name']} {top_bet['direction']} + {len(best_bets)-1} more | Baseline MLB"
+    log.info(f"Found {len(best_bets)} best bets to include")
 
     html_body = build_email_html(best_bets, game_date)
+    subject = f"Baseline MLB Best Bets — {date_display} ({len(best_bets)} plays)"
 
     if dry_run:
-        log.info("DRY RUN - Preview email:")
+        log.info("DRY RUN - Email preview:")
+        print(f"Subject: {subject}")
+        print(f"Subscribers: {subscribers[:3]}... ({len(subscribers)} total)")
+        print(f"HTML length: {len(html_body)} chars")
+        print("\n--- HTML Preview (first 500 chars) ---")
         print(html_body[:500])
-        log.info(f"Would send to {len(subscribers)} subscribers")
         return
 
     sent = 0
@@ -289,7 +293,8 @@ def main(dry_run=False):
         else:
             failed += 1
 
-    log.info(f"=== Done. Sent: {sent}, Failed: {failed} ===")
+    log.info(f"Newsletter sent: {sent} success, {failed} failed")
+    log.info("=== Done ===")
 
 
 if __name__ == "__main__":

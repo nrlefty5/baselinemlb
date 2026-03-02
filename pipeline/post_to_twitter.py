@@ -15,11 +15,11 @@ Usage:
   python pipeline/post_to_twitter.py --dry-run  # Preview without posting
 """
 
-import os
-import json
 import logging
-import requests
+import os
 from datetime import date
+
+import requests
 
 logging.basicConfig(
     level=logging.INFO,
@@ -137,7 +137,7 @@ def build_tweets(plays: list, game_date: str) -> list:
             f"(Proj: {p['projection']:.1f}, Edge: {'+' if p['edge'] > 0 else ''}{p['edge']:.1f}%)"
         )
     header += "\n".join(lines)
-    header += f"\n\n🧵 Thread below with full analysis..."
+    header += "\n\n🧵 Thread below with full analysis..."
     tweets.append(header)
 
     # Individual play tweets
@@ -226,7 +226,7 @@ def main(dry_run=False):
             log.warning(f"  Failed at tweet {i+1}, stopping thread.")
             break
 
-    log.info(f"=== Done ===")
+    log.info("=== Done ===")
 
 
 if __name__ == "__main__":

@@ -1,12 +1,14 @@
 import os
-import requests
 from datetime import date
-from supabase import create_client, Client
+
+import requests
 from dotenv import load_dotenv
+
+from supabase import Client, create_client
 
 load_dotenv()
 
-# ── Clients ────────────────────────────────────────────────────────────────────
+# ── Clients ─────────────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "").strip()
@@ -20,7 +22,7 @@ if not all([ODDS_API_KEY, SUPABASE_URL, SUPABASE_KEY]):
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ── Config ───────────────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────────────────
 REGIONS = "us"
 MARKETS = (
     "batter_hits,batter_home_runs,batter_rbis,"

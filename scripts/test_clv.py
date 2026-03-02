@@ -17,8 +17,6 @@ Run locally:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch
-from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # Pure-function helpers extracted from track_clv.py logic
