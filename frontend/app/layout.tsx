@@ -34,28 +34,34 @@ export default function RootLayout({
             </Link>
 
             {/* Nav Links */}
-            <div className="flex items-center gap-6 text-sm">
-              <Link
-                href="/"
-                className="text-slate-400 hover:text-slate-100 transition-colors"
-              >
-                Edges
-              </Link>
+            <div className="flex items-center gap-1 sm:gap-4 text-sm">
               <Link
                 href="/best-bets"
-                className="text-slate-400 hover:text-slate-100 transition-colors"
+                className="text-slate-400 hover:text-slate-100 transition-colors px-2 py-1"
               >
                 Best Bets
               </Link>
               <Link
+                href="/props"
+                className="hidden sm:inline-block text-slate-400 hover:text-slate-100 transition-colors px-2 py-1"
+              >
+                Props
+              </Link>
+              <Link
+                href="/calibration"
+                className="hidden sm:inline-block text-slate-400 hover:text-slate-100 transition-colors px-2 py-1"
+              >
+                Accuracy
+              </Link>
+              <Link
                 href="/newsletter"
-                className="text-slate-400 hover:text-slate-100 transition-colors"
+                className="hidden md:inline-block text-slate-400 hover:text-slate-100 transition-colors px-2 py-1"
               >
                 Newsletter
               </Link>
               <Link
                 href="/pricing"
-                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg font-medium transition-colors"
+                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg font-medium transition-colors ml-1"
               >
                 Pricing
               </Link>
@@ -70,22 +76,25 @@ export default function RootLayout({
 
         {/* ── Footer ── */}
         <footer className="border-t border-slate-800 mt-20">
-          <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <p className="text-slate-500 text-sm">
-              © {new Date().getFullYear()} BaselineMLB. For entertainment purposes only.
-            </p>
-            <div className="flex items-center gap-4 text-sm text-slate-500">
-              <Link href="/pricing" className="hover:text-slate-300 transition-colors">Pricing</Link>
-              <Link href="/best-bets" className="hover:text-slate-300 transition-colors">Best Bets</Link>
-              <Link href="/newsletter" className="hover:text-slate-300 transition-colors">Newsletter</Link>
-              <a
-                href="/api/v1/status"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-slate-300 transition-colors"
-              >
-                API Status
-              </a>
+          <div className="max-w-6xl mx-auto px-4 py-8">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <p className="text-slate-500 text-sm">
+                © {new Date().getFullYear()} BaselineMLB. For entertainment purposes only.
+              </p>
+              <div className="flex items-center gap-4 text-sm text-slate-500">
+                <Link href="/best-bets" className="hover:text-slate-300 transition-colors">Best Bets</Link>
+                <Link href="/pricing" className="hover:text-slate-300 transition-colors">Pricing</Link>
+                <Link href="/calibration" className="hover:text-slate-300 transition-colors">Accuracy</Link>
+                <Link href="/newsletter" className="hover:text-slate-300 transition-colors">Newsletter</Link>
+                <a
+                  href="/api/v1/status"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-slate-300 transition-colors"
+                >
+                  API Status
+                </a>
+              </div>
             </div>
           </div>
         </footer>

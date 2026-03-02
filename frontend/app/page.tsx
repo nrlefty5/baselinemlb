@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import EmailSignup from './EmailSignup'
+import Link from 'next/link'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,6 +32,21 @@ async function getTodaysGames() {
     return []
   }
   return data || []
+}
+
+async function getSubscriberCount(): Promise<number> {
+  if (!supabaseUrl || !supabaseAnonKey) return 0
+  try {
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const { count, error } = await supabase
+      .from('email_subscribers')
+      .select('*', { count: 'exact', head: true })
+      .eq('active', true)
+    if (error) return 0
+    return count || 0
+  } catch {
+    return 0
+  }
 }
 
 function GameCard({ game }: { game: any }) {
@@ -78,7 +94,10 @@ function GameCard({ game }: { game: any }) {
 }
 
 export default async function HomePage() {
-  const games = await getTodaysGames()
+  const [games, subscriberCount] = await Promise.all([
+    getTodaysGames(),
+    getSubscriberCount(),
+  ])
   const daysUntil = getDaysUntilOpeningDay()
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -95,7 +114,7 @@ export default async function HomePage() {
         <div className="mb-8 p-4 bg-gradient-to-r from-green-900/40 to-gray-900/40 border border-green-700/50 rounded-xl flex items-center justify-between">
           <div>
             <div className="text-sm text-green-400 font-medium uppercase tracking-wider mb-0.5">Opening Day 2026</div>
-            <div className="text-white text-sm">March 26 — Full model projections go live</div>
+            <div className="text-white text-sm">March 26 &mdash; Full model projections go live</div>
           </div>
           <div className="text-right">
             <div className="text-4xl font-bold text-white">{daysUntil}</div>
@@ -105,14 +124,14 @@ export default async function HomePage() {
       )}
 
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Today's Slate</h1>
+        <h1 className="text-3xl font-bold text-white mb-2">Today&apos;s Slate</h1>
         <p className="text-slate-400">{today}</p>
       </div>
 
       {games.length === 0 ? (
         <div>
           <div className="text-center py-12">
-            <div className="text-4xl mb-4">⚾</div>
+            <div className="text-4xl mb-4">&#x26BE;</div>
             <h2 className="text-xl font-semibold text-slate-300 mb-2">No games today</h2>
             <p className="text-slate-500 max-w-sm mx-auto">
               {!supabaseUrl
@@ -121,36 +140,58 @@ export default async function HomePage() {
             </p>
           </div>
 
-          {/* Email signup CTA */}
-          <div className="max-w-sm mx-auto mt-4">
+          {/* Waitlist / Newsletter Signup */}
+          <div className="max-w-md mx-auto mt-6">
             <EmailSignup />
+            {subscriberCount > 0 && (
+              <p className="text-center text-xs text-slate-500 mt-2">
+                Join {subscriberCount.toLocaleString()}+ subscribers on the waitlist
+              </p>
+            )}
           </div>
 
           {/* Quick nav to other pages */}
-          <div className="mt-10 grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <a href="/props" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
-              <div className="text-green-400 text-xl mb-2">📊</div>
+          <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Link href="/best-bets" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
+              <div className="text-green-400 text-xl mb-2">&#x1F3AF;</div>
+              <div className="font-semibold text-white">Best Bets</div>
+              <div className="text-xs text-slate-400 mt-1">Top picks ranked by edge %</div>
+            </Link>
+            <Link href="/props" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
+              <div className="text-green-400 text-xl mb-2">&#x1F4CA;</div>
               <div className="font-semibold text-white">Props</div>
-              <div className="text-xs text-slate-400 mt-1">Today's player prop lines with edge %</div>
-            </a>
-            <a href="/projections" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
-              <div className="text-green-400 text-xl mb-2">🧠</div>
+              <div className="text-xs text-slate-400 mt-1">Today&apos;s player prop lines with edge %</div>
+            </Link>
+            <Link href="/projections" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
+              <div className="text-green-400 text-xl mb-2">&#x1F9E0;</div>
               <div className="font-semibold text-white">Projections</div>
               <div className="text-xs text-slate-400 mt-1">Glass-box K projection model</div>
-            </a>
-            <a href="/players" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
-              <div className="text-green-400 text-xl mb-2">👤</div>
-              <div className="font-semibold text-white">Players</div>
-              <div className="text-xs text-slate-400 mt-1">Search 2,000+ MLB roster entries</div>
-            </a>
+            </Link>
+            <Link href="/calibration" className="block p-4 bg-gray-800 border border-gray-700 rounded-xl hover:border-green-500 transition-colors">
+              <div className="text-green-400 text-xl mb-2">&#x1F4C8;</div>
+              <div className="font-semibold text-white">Calibration</div>
+              <div className="text-xs text-slate-400 mt-1">Model accuracy and calibration chart</div>
+            </Link>
           </div>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {games.map((game: any) => (
-            <GameCard key={game.game_pk} game={game} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {games.map((game: any) => (
+              <GameCard key={game.game_pk} game={game} />
+            ))}
+          </div>
+
+          {/* Waitlist / Newsletter Signup below games */}
+          <div className="mt-12 max-w-md mx-auto">
+            <EmailSignup />
+            {subscriberCount > 0 && (
+              <p className="text-center text-xs text-slate-500 mt-2">
+                Join {subscriberCount.toLocaleString()}+ subscribers on the waitlist
+              </p>
+            )}
+          </div>
+        </>
       )}
     </div>
   )

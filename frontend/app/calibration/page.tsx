@@ -1,14 +1,26 @@
 import { createClient } from '@supabase/supabase-js'
+import { Metadata } from 'next'
+import CalibrationChartWrapper from './CalibrationChartWrapper'
+
+export const metadata: Metadata = {
+  title: 'Calibration — BaselineMLB',
+  description: 'Model calibration chart showing how well our confidence scores predict actual outcomes.',
+  openGraph: {
+    title: 'Calibration Chart — BaselineMLB',
+    description: 'Is the model well-calibrated? When we say 70% confidence, are we right 70% of the time?',
+  },
+}
 
 export const dynamic = 'force-dynamic'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-interface CalibrationBucket {
+export interface CalibrationBucket {
   range: string
   lower: number
   upper: number
+  midpoint: number
   total: number
   hits: number
   hitRate: number
@@ -35,22 +47,21 @@ async function getCalibrationData(): Promise<CalibrationBucket[]> {
 
   // Bucket projections by confidence level
   const buckets: CalibrationBucket[] = [
-    { range: '50-55%', lower: 0.50, upper: 0.55, total: 0, hits: 0, hitRate: 0 },
-    { range: '55-60%', lower: 0.55, upper: 0.60, total: 0, hits: 0, hitRate: 0 },
-    { range: '60-65%', lower: 0.60, upper: 0.65, total: 0, hits: 0, hitRate: 0 },
-    { range: '65-70%', lower: 0.65, upper: 0.70, total: 0, hits: 0, hitRate: 0 },
-    { range: '70-75%', lower: 0.70, upper: 0.75, total: 0, hits: 0, hitRate: 0 },
-    { range: '75-80%', lower: 0.75, upper: 0.80, total: 0, hits: 0, hitRate: 0 },
-    { range: '80-85%', lower: 0.80, upper: 0.85, total: 0, hits: 0, hitRate: 0 },
-    { range: '85-90%', lower: 0.85, upper: 0.90, total: 0, hits: 0, hitRate: 0 },
-    { range: '90-95%', lower: 0.90, upper: 0.95, total: 0, hits: 0, hitRate: 0 },
+    { range: '50-55%', lower: 0.50, upper: 0.55, midpoint: 52.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '55-60%', lower: 0.55, upper: 0.60, midpoint: 57.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '60-65%', lower: 0.60, upper: 0.65, midpoint: 62.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '65-70%', lower: 0.65, upper: 0.70, midpoint: 67.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '70-75%', lower: 0.70, upper: 0.75, midpoint: 72.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '75-80%', lower: 0.75, upper: 0.80, midpoint: 77.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '80-85%', lower: 0.80, upper: 0.85, midpoint: 82.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '85-90%', lower: 0.85, upper: 0.90, midpoint: 87.5, total: 0, hits: 0, hitRate: 0 },
+    { range: '90-95%', lower: 0.90, upper: 0.95, midpoint: 92.5, total: 0, hits: 0, hitRate: 0 },
   ]
 
   for (const row of data) {
     const conf = row.confidence
     if (conf == null || row.projection == null || row.actual == null) continue
 
-    // Find the bucket
     for (const bucket of buckets) {
       if (conf >= bucket.lower && conf < bucket.upper) {
         bucket.total++
@@ -73,7 +84,6 @@ async function getCalibrationData(): Promise<CalibrationBucket[]> {
 }
 
 function CalibrationBar({ bucket, maxTotal }: { bucket: CalibrationBucket; maxTotal: number }) {
-  const barWidth = bucket.total > 0 ? Math.max((bucket.total / maxTotal) * 100, 5) : 0
   const midpoint = (bucket.lower + bucket.upper) / 2 * 100
 
   // Color based on calibration: green if hitRate close to confidence, red if far off
@@ -125,7 +135,7 @@ export default async function CalibrationPage() {
   const maxTotal = Math.max(...buckets.map(b => b.total), 1)
 
   return (
-    <div>
+    <div className="max-w-4xl mx-auto px-4 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-2">Confidence Calibration</h1>
         <p className="text-slate-400">
@@ -133,12 +143,13 @@ export default async function CalibrationPage() {
         </p>
         <p className="text-sm text-slate-500 mt-2">
           A well-calibrated model means: when we say 70% confidence, about 70% of those predictions should be accurate.
+          The diagonal line below represents perfect calibration.
         </p>
       </div>
 
       {buckets.length === 0 ? (
         <div className="text-center py-16">
-          <div className="text-4xl mb-4">📈</div>
+          <div className="text-4xl mb-4">&#x1F4C8;</div>
           <h2 className="text-xl font-semibold text-slate-300 mb-2">No calibration data yet</h2>
           <p className="text-slate-500 max-w-md mx-auto">
             Calibration data appears once projections have been graded against actual results.
@@ -147,10 +158,30 @@ export default async function CalibrationPage() {
         </div>
       ) : (
         <div>
-          {/* Calibration Chart */}
+          {/* Recharts Calibration Chart */}
           <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6 mb-8">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white">Calibration Chart</h2>
+              <h2 className="text-lg font-semibold text-white">Calibration Plot</h2>
+              <div className="flex items-center gap-4 text-xs text-slate-500">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-0.5 bg-blue-400" />
+                  <span>Model accuracy</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="w-3 h-0.5 bg-slate-500 opacity-50" style={{ borderTop: '1px dashed' }} />
+                  <span>Perfect calibration</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Recharts scatter/line chart */}
+            <CalibrationChartWrapper buckets={buckets} />
+          </div>
+
+          {/* Bar Chart */}
+          <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-6 mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white">Accuracy by Confidence Bucket</h2>
               <div className="flex items-center gap-4 text-xs text-slate-500">
                 <div className="flex items-center gap-1.5">
                   <div className="w-3 h-3 bg-green-500 rounded" />
@@ -215,7 +246,7 @@ export default async function CalibrationPage() {
                   const expected = Math.round((bucket.lower + bucket.upper) / 2 * 100)
                   const deviation = bucket.hitRate - expected
                   return (
-                    <tr key={bucket.range} className="hover:bg-gray-750">
+                    <tr key={bucket.range} className="hover:bg-gray-800/50 transition-colors">
                       <td className="py-2 px-4 font-mono text-slate-300">{bucket.range}</td>
                       <td className="py-2 px-4 text-center text-slate-400">{bucket.total}</td>
                       <td className="py-2 px-4 text-center text-slate-400">{bucket.hits}</td>
@@ -235,6 +266,18 @@ export default async function CalibrationPage() {
                 })}
               </tbody>
             </table>
+          </div>
+
+          {/* Methodology note */}
+          <div className="mt-8 p-4 bg-gray-900/50 rounded-lg border border-gray-800 text-xs text-slate-500">
+            <p className="font-medium text-slate-400 mb-1">Calibration methodology:</p>
+            <ul className="space-y-0.5">
+              <li>&bull; Projections are bucketed by their model-assigned confidence level</li>
+              <li>&bull; A prediction is scored as a &ldquo;hit&rdquo; if the actual value was within 20% of the projection</li>
+              <li>&bull; Perfect calibration means actual hit rate matches the confidence bucket midpoint</li>
+              <li>&bull; The diagonal line in the chart above represents perfect calibration</li>
+              <li>&bull; Brier score and log-loss metrics are planned for the next model version</li>
+            </ul>
           </div>
         </div>
       )}
