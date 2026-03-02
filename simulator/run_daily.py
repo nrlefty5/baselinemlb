@@ -52,12 +52,14 @@ import logging
 import os
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
+if TYPE_CHECKING:
+    from .monte_carlo_engine import BatterProfile
+
 import requests
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1017,6 @@ def _normalize_stat_type(raw_stat: str) -> str:
     """
     _MAP: dict[str, str] = {
         "pitcher_strikeouts": "K",
-        "pitcher_strikeouts": "K",
         "batter_strikeouts": "K",
         "batter_total_bases": "TB",
         "total_bases": "TB",
@@ -1083,7 +1084,9 @@ def build_batter_profile(
         Minimum PA for rate calculations.
     """
     from .monte_carlo_engine import (
-        BatterProfile, build_batter_probs, MLB_AVG_PROBS,
+        MLB_AVG_PROBS,
+        BatterProfile,
+        build_batter_probs,
     )
 
     pa = int(stats.get("plateAppearances", 0))
