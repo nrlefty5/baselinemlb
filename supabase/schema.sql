@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS accuracy_summary (
   pushes          INT DEFAULT 0,
   hit_rate        NUMERIC(5,4),
   avg_edge        NUMERIC(6,3),
+  avg_clv         NUMERIC(6,3) DEFAULT NULL,
   updated_at      TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (period, stat_type)
 );

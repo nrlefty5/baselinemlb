@@ -1,5 +1,5 @@
-import { createClient } from '@supabase/supabase-js'
 import { Metadata } from 'next'
+import { getPublicClient, isSupabaseConfigured } from '../lib/supabase'
 import CalibrationChartWrapper from './CalibrationChartWrapper'
 
 export const metadata: Metadata = {
@@ -12,9 +12,7 @@ export const metadata: Metadata = {
 }
 
 export const dynamic = 'force-dynamic'
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+export const revalidate = 0
 
 export interface CalibrationBucket {
   range: string
@@ -26,67 +24,150 @@ export interface CalibrationBucket {
   hitRate: number
 }
 
-async function getCalibrationData(): Promise<CalibrationBucket[]> {
-  if (!supabaseUrl || !supabaseAnonKey) {
-    return []
-  }
-  const supabase = createClient(supabaseUrl, supabaseAnonKey)
+interface BacktestRow {
+  date: string
+  prop_type: string
+  total_predictions: number
+  correct_predictions: number
+  accuracy_pct: number
+  avg_edge: number
+}
 
-  // Fetch graded projections (ones with actual results)
-  const { data, error } = await supabase
-    .from('projections')
-    .select('confidence, projection, actual, stat_type')
-    .not('actual', 'is', null)
-    .not('confidence', 'is', null)
-    .order('game_date', { ascending: false })
-    .limit(5000)
+// ─────────────────────────────────────────────────────────────────────────────
+// Data fetching: try backtest_results first, fall back to projections
+// ─────────────────────────────────────────────────────────────────────────────
 
-  if (error || !data || data.length === 0) {
-    return []
-  }
+async function getCalibrationFromBacktest(): Promise<CalibrationBucket[]> {
+  if (!isSupabaseConfigured()) return []
+  try {
+    const supabase = getPublicClient()
+    const { data, error } = await supabase
+      .from('backtest_results')
+      .select('date, prop_type, total_predictions, correct_predictions, accuracy_pct, avg_edge')
+      .neq('prop_type', 'ALL')
+      .order('date', { ascending: true })
 
-  // Bucket projections by confidence level
-  const buckets: CalibrationBucket[] = [
-    { range: '50-55%', lower: 0.50, upper: 0.55, midpoint: 52.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '55-60%', lower: 0.55, upper: 0.60, midpoint: 57.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '60-65%', lower: 0.60, upper: 0.65, midpoint: 62.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '65-70%', lower: 0.65, upper: 0.70, midpoint: 67.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '70-75%', lower: 0.70, upper: 0.75, midpoint: 72.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '75-80%', lower: 0.75, upper: 0.80, midpoint: 77.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '80-85%', lower: 0.80, upper: 0.85, midpoint: 82.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '85-90%', lower: 0.85, upper: 0.90, midpoint: 87.5, total: 0, hits: 0, hitRate: 0 },
-    { range: '90-95%', lower: 0.90, upper: 0.95, midpoint: 92.5, total: 0, hits: 0, hitRate: 0 },
-  ]
+    if (error || !data || data.length === 0) return []
 
-  for (const row of data) {
-    const conf = row.confidence
-    if (conf == null || row.projection == null || row.actual == null) continue
+    const rows = data as BacktestRow[]
 
-    for (const bucket of buckets) {
-      if (conf >= bucket.lower && conf < bucket.upper) {
-        bucket.total++
-        // "Hit" = projection was within 20% of actual OR direction was correct
-        const pct_diff = Math.abs(row.projection - row.actual) / Math.max(row.actual, 0.1)
-        if (pct_diff <= 0.20) {
-          bucket.hits++
+    // Group by avg_edge bucket to build calibration curve
+    // avg_edge represents the model's predicted edge; accuracy_pct is the actual hit rate
+    // We bucket by edge magnitude ranges (mapped to confidence-like buckets)
+    const buckets: CalibrationBucket[] = [
+      { range: '50-55%', lower: 0.50, upper: 0.55, midpoint: 52.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '55-60%', lower: 0.55, upper: 0.60, midpoint: 57.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '60-65%', lower: 0.60, upper: 0.65, midpoint: 62.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '65-70%', lower: 0.65, upper: 0.70, midpoint: 67.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '70-75%', lower: 0.70, upper: 0.75, midpoint: 72.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '75-80%', lower: 0.75, upper: 0.80, midpoint: 77.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '80-85%', lower: 0.80, upper: 0.85, midpoint: 82.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '85-90%', lower: 0.85, upper: 0.90, midpoint: 87.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '90-95%', lower: 0.90, upper: 0.95, midpoint: 92.5, total: 0, hits: 0, hitRate: 0 },
+    ]
+
+    // Map edge ranges to confidence: edge 0-5% → ~50-55%, edge 5-10% → ~55-60%, etc.
+    for (const row of rows) {
+      const edge = Math.abs(row.avg_edge || 0)
+      const accPct = row.accuracy_pct || 0
+
+      // Convert edge to approximate confidence bucket
+      // Higher edges correspond to higher confidence predictions
+      const confidence = Math.min(0.95, 0.50 + edge * 5)
+
+      for (const bucket of buckets) {
+        if (confidence >= bucket.lower && confidence < bucket.upper) {
+          bucket.total += row.total_predictions || 0
+          bucket.hits += row.correct_predictions || 0
+          break
         }
-        break
       }
     }
+
+    for (const bucket of buckets) {
+      bucket.hitRate = bucket.total > 0 ? Math.round((bucket.hits / bucket.total) * 100) : 0
+    }
+
+    return buckets.filter(b => b.total > 0)
+  } catch (e) {
+    console.error('[CalibrationPage] backtest_results fetch error:', e)
+    return []
+  }
+}
+
+async function getCalibrationFromProjections(): Promise<CalibrationBucket[]> {
+  if (!isSupabaseConfigured()) return []
+  try {
+    const supabase = getPublicClient()
+
+    const { data, error } = await supabase
+      .from('projections')
+      .select('confidence, projection, actual, stat_type')
+      .not('actual', 'is', null)
+      .not('confidence', 'is', null)
+      .order('game_date', { ascending: false })
+      .limit(5000)
+
+    if (error || !data || data.length === 0) return []
+
+    const buckets: CalibrationBucket[] = [
+      { range: '50-55%', lower: 0.50, upper: 0.55, midpoint: 52.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '55-60%', lower: 0.55, upper: 0.60, midpoint: 57.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '60-65%', lower: 0.60, upper: 0.65, midpoint: 62.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '65-70%', lower: 0.65, upper: 0.70, midpoint: 67.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '70-75%', lower: 0.70, upper: 0.75, midpoint: 72.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '75-80%', lower: 0.75, upper: 0.80, midpoint: 77.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '80-85%', lower: 0.80, upper: 0.85, midpoint: 82.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '85-90%', lower: 0.85, upper: 0.90, midpoint: 87.5, total: 0, hits: 0, hitRate: 0 },
+      { range: '90-95%', lower: 0.90, upper: 0.95, midpoint: 92.5, total: 0, hits: 0, hitRate: 0 },
+    ]
+
+    for (const row of data) {
+      const conf = row.confidence
+      if (conf == null || row.projection == null || row.actual == null) continue
+
+      for (const bucket of buckets) {
+        if (conf >= bucket.lower && conf < bucket.upper) {
+          bucket.total++
+          const pct_diff = Math.abs(row.projection - row.actual) / Math.max(row.actual, 0.1)
+          if (pct_diff <= 0.20) {
+            bucket.hits++
+          }
+          break
+        }
+      }
+    }
+
+    for (const bucket of buckets) {
+      bucket.hitRate = bucket.total > 0 ? Math.round((bucket.hits / bucket.total) * 100) : 0
+    }
+
+    return buckets.filter(b => b.total > 0)
+  } catch (e) {
+    console.error('[CalibrationPage] projections fetch error:', e)
+    return []
+  }
+}
+
+async function getCalibrationData(): Promise<{ buckets: CalibrationBucket[]; source: 'backtest' | 'projections' | 'none' }> {
+  // Try backtest_results first (more reliable, pre-aggregated)
+  const backtestBuckets = await getCalibrationFromBacktest()
+  if (backtestBuckets.length > 0) {
+    return { buckets: backtestBuckets, source: 'backtest' }
   }
 
-  // Calculate hit rates
-  for (const bucket of buckets) {
-    bucket.hitRate = bucket.total > 0 ? Math.round((bucket.hits / bucket.total) * 100) : 0
+  // Fall back to projections table (needs graded data with actual values)
+  const projBuckets = await getCalibrationFromProjections()
+  if (projBuckets.length > 0) {
+    return { buckets: projBuckets, source: 'projections' }
   }
 
-  return buckets.filter(b => b.total > 0)
+  return { buckets: [], source: 'none' }
 }
 
 function CalibrationBar({ bucket, maxTotal }: { bucket: CalibrationBucket; maxTotal: number }) {
   const midpoint = (bucket.lower + bucket.upper) / 2 * 100
 
-  // Color based on calibration: green if hitRate close to confidence, red if far off
   const deviation = Math.abs(bucket.hitRate - midpoint)
   const color =
     deviation <= 5 ? 'bg-green-500' :
@@ -98,13 +179,11 @@ function CalibrationBar({ bucket, maxTotal }: { bucket: CalibrationBucket; maxTo
     <div className="flex items-center gap-4 py-2">
       <div className="w-20 text-right text-sm text-slate-400 font-mono">{bucket.range}</div>
       <div className="flex-1 flex items-center gap-3">
-        {/* Expected confidence line */}
         <div className="relative flex-1 h-8 bg-gray-800 rounded-lg overflow-hidden">
           <div
             className={`absolute left-0 top-0 h-full ${color} rounded-lg transition-all`}
             style={{ width: `${bucket.hitRate}%` }}
           />
-          {/* Expected marker */}
           <div
             className="absolute top-0 h-full w-0.5 bg-white/30"
             style={{ left: `${midpoint}%` }}
@@ -122,7 +201,7 @@ function CalibrationBar({ bucket, maxTotal }: { bucket: CalibrationBucket; maxTo
 }
 
 export default async function CalibrationPage() {
-  const buckets = await getCalibrationData()
+  const { buckets, source } = await getCalibrationData()
 
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'long',
@@ -147,13 +226,31 @@ export default async function CalibrationPage() {
         </p>
       </div>
 
+      {/* Data source indicator */}
+      {source === 'backtest' && (
+        <div className="bg-gradient-to-r from-blue-900/40 to-purple-900/30 border border-blue-700/30 rounded-lg p-3 mb-6">
+          <p className="text-xs text-blue-300">
+            Data source: backtest_results table &mdash; aggregated Monte Carlo backtest accuracy
+          </p>
+        </div>
+      )}
+      {source === 'projections' && (
+        <div className="bg-gradient-to-r from-slate-800/40 to-slate-700/30 border border-slate-600/30 rounded-lg p-3 mb-6">
+          <p className="text-xs text-slate-400">
+            Data source: projections table &mdash; graded individual predictions with confidence scores
+          </p>
+        </div>
+      )}
+
       {buckets.length === 0 ? (
         <div className="text-center py-16">
           <div className="text-4xl mb-4">&#x1F4C8;</div>
           <h2 className="text-xl font-semibold text-slate-300 mb-2">No calibration data yet</h2>
           <p className="text-slate-500 max-w-md mx-auto">
             Calibration data appears once projections have been graded against actual results.
-            This requires at least a few days of games to have been played and scored.
+            Run the backtest to populate: <code className="bg-slate-800 px-2 py-0.5 rounded text-xs">
+              python scripts/backtest_full_aug_sep.py --upload
+            </code>
           </p>
         </div>
       ) : (
@@ -174,7 +271,6 @@ export default async function CalibrationPage() {
               </div>
             </div>
 
-            {/* Recharts scatter/line chart */}
             <CalibrationChartWrapper buckets={buckets} />
           </div>
 
@@ -276,7 +372,7 @@ export default async function CalibrationPage() {
               <li>&bull; A prediction is scored as a &ldquo;hit&rdquo; if the actual value was within 20% of the projection</li>
               <li>&bull; Perfect calibration means actual hit rate matches the confidence bucket midpoint</li>
               <li>&bull; The diagonal line in the chart above represents perfect calibration</li>
-              <li>&bull; Brier score and log-loss metrics are planned for the next model version</li>
+              <li>&bull; Data sourced from {source === 'backtest' ? 'backtest_results' : 'projections'} table</li>
             </ul>
           </div>
         </div>
