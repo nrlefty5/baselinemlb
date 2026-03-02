@@ -1,0 +1,100 @@
+name: Monte Carlo Simulator
+
+on:
+  schedule:
+    # Run daily at 11:00 AM ET (15:00 UTC during EDT) - after morning data pipeline
+    - cron: "0 15 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to simulate (YYYY-MM-DD)'
+        required: false
+        type: string
+      n_sims:
+        description: 'Number of simulations per game'
+        required: false
+        default: '3000'
+        type: string
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_PROJECT_URL }}
+  SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+  OPENWEATHER_API_KEY: ${{ secrets.OPENWEATHER_API_KEY }}
+
+jobs:
+  # Skip during off-season (Nov 16 – Feb 14)
+  season-check:
+    runs-on: ubuntu-latest
+    outputs:
+      in_season: ${{ steps.check.outputs.in_season }}
+    steps:
+      - id: check
+        run: |
+          MONTH=$(date +%m)
+          DAY=$(date +%d)
+          if ([ "$MONTH" -ge 11 ] && [ "$DAY" -ge 16 ]) || [ "$MONTH" -eq 12 ] || [ "$MONTH" -eq 1 ] || ([ "$MONTH" -eq 2 ] && [ "$DAY" -le 14 ]); then
+            echo "in_season=false" >> $GITHUB_OUTPUT
+          else
+            echo "in_season=true" >> $GITHUB_OUTPUT
+          fi
+
+  simulate:
+    needs: season-check
+    if: needs.season-check.outputs.in_season == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-simulator.txt
+
+      - name: Fetch lineups
+        run: |
+          if [ -n "${{ inputs.date }}" ]; then
+            python pipeline/fetch_lineups.py --date ${{ inputs.date }}
+          else
+            python pipeline/fetch_lineups.py
+          fi
+
+      - name: Fetch weather
+        run: |
+          if [ -n "${{ inputs.date }}" ]; then
+            python pipeline/fetch_weather.py --date ${{ inputs.date }}
+          else
+            python pipeline/fetch_weather.py
+          fi
+
+      - name: Run daily simulation
+        run: |
+          ARGS="--n-sims ${{ inputs.n_sims || '3000' }}"
+          if [ -n "${{ inputs.date }}" ]; then
+            ARGS="$ARGS --date ${{ inputs.date }}"
+          fi
+          python -m simulator.run_daily $ARGS
+
+  backtest:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-simulator.txt
+
+      - name: Run backtest
+        run: python scripts/backtest_simulator.py --sample-size 10
