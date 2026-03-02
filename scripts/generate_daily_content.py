@@ -21,14 +21,15 @@ Output:
   - dashboard/data/daily_content_{date}.json: structured data for frontend
 """
 
-import os
-import sys
+import argparse
 import json
 import logging
-import argparse
-import requests
+import os
+import sys
 from datetime import date, datetime
 from typing import Optional
+
+import requests
 
 # ---------------------------------------------------------------------------
 # Config & logging
@@ -63,7 +64,7 @@ def confidence_tier(deviation: float) -> str:
         return "LOW"
 
 def confidence_emoji(tier: str) -> str:
-    return {"HIGH": "🔥", "MEDIUM": "⚡", "LOW": "📊"}.get(tier, "📊")
+    return {"🔥": "🔥", "HIGH": "🔥", "MEDIUM": "⚡", "LOW": "📊"}.get(tier, "📊")
 
 # ---------------------------------------------------------------------------
 # Supabase helpers — matches existing pipeline patterns
@@ -473,7 +474,7 @@ def run(game_date: str, fmt: str = "all", top_n: int = 10):
         json.dump(export_data, f, indent=2, default=str)
     log.info(f"Exported content to {content_file}")
 
-    log.info(f"=== Content generation complete ===")
+    log.info("=== Content generation complete ===")
 
 
 # ---------------------------------------------------------------------------

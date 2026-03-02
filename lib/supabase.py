@@ -13,13 +13,12 @@ Environment Variables (required):
     SUPABASE_SERVICE_KEY    Supabase service role key (for pipeline writes)
 """
 
+import logging
 import os
 import sys
-import json
-import logging
+from typing import Any, Dict, List, Optional
+
 import requests
-from datetime import date, datetime
-from typing import Optional, List, Dict, Any
 
 log = logging.getLogger("baselinemlb.supabase")
 
