@@ -700,11 +700,14 @@ class OutputWriter:
             return f"[baseball] BaselineMLB ({self.date_str}): No strong edges found today. #MLB #Props"
 
         tweet_lines = [f"[baseball] BaselineMLB Top Edges -- {self.date_str}"]
+        up_arrow = "\U0001f53c"
+        down_arrow = "\U0001f53d"
         for a in edges[:5]:
             ev_val = a.ev_over if a.recommendation == "OVER" else a.ev_under
             game_label = f"{a.away_team}@{a.home_team}" if a.away_team else f"Game {a.game_pk}"
+            arrow = up_arrow if a.recommendation == "OVER" else down_arrow
             tweet_lines.append(
-                f"{'\U0001f53c' if a.recommendation == 'OVER' else '\U0001f53d'} "
+                f"{arrow} "
                 f"{a.player_name} {a.stat.upper()} {a.recommendation} {a.line} "
                 f"({game_label}) | Sim: {a.sim_p_over:.0%} | EV: {ev_val:+.2f}"
             )

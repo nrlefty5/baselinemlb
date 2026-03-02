@@ -6,9 +6,9 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { authenticateRequest } from '../../../lib/auth'
-import { TIER_CAPS, type Edge, type EdgeWithDistribution, type ApiResponse } from '../../../lib/types'
-import { getPublicClient } from '../../../lib/supabase'
+import { authenticateRequest } from '../../../../lib/auth'
+import { TIER_CAPS, type Edge, type EdgeWithDistribution, type ApiResponse } from '../../../../lib/types'
+import { getPublicClient } from '../../../../lib/supabase'
 
 export const dynamic = 'force-dynamic'
 

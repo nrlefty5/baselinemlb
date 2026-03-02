@@ -4,9 +4,9 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server'
-import { authenticateRequest } from '../../../lib/auth'
-import { type ApiResponse, type BacktestSummary, type AccuracySummary } from '../../../lib/types'
-import { getPublicClient } from '../../../lib/supabase'
+import { authenticateRequest } from '../../../../lib/auth'
+import { type ApiResponse, type BacktestSummary, type AccuracySummary } from '../../../../lib/types'
+import { getPublicClient } from '../../../../lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
