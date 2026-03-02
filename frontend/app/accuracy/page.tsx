@@ -4,29 +4,37 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Static backtest baseline — 2025 season (always shown as comparison)
-// ─────────────────────────────────────────────────────────────────────────────
-const BACKTEST_DATA = {
-  label: 'Model Validation: 2025 Season Backtest',
-  season: '2025',
-  model: 'v1.0-glass-box',
-  dateRange: '2025-04-01 to 2025-09-30',
-  totalProjections: 4804,
-  daysProcessed: 183,
-  daysWithGames: 179,
-  note: 'Projection accuracy only — no prop lines available for 2025 backtest period',
-  projectionAccuracy: {
-    meanAbsoluteError: 1.91,
-    medianError: 1.62,
-    within1k: 32.8,
-    within2k: 58.6,
-    within3k: 78.7,
-  },
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
+interface BacktestRow {
+  date: string
+  prop_type: string
+  total_predictions: number
+  correct_predictions: number
+  accuracy_pct: number
+  profit_loss: number
+  roi_pct: number
+  avg_edge: number
+  tier_a_roi: number
+  tier_b_roi: number
+  tier_c_roi: number
+}
+
+interface PropSummary {
+  prop_type: string
+  total_predictions: number
+  correct_predictions: number
+  accuracy_pct: number
+  avg_roi_pct: number
+  avg_edge: number
+  avg_tier_a_roi: number
+  avg_tier_b_roi: number
+  avg_tier_c_roi: number
+  total_profit_loss: number
+  brier_score: number | null
+  days_tested: number
+}
+
 interface AccuracyRow {
   stat_type: string
   total_picks: number
@@ -51,17 +59,30 @@ interface PickRow {
   edge: number | null
 }
 
-interface LiveStats {
-  total: number
-  hits: number
-  misses: number
-  pushes: number
-  mae: number | null
+// ─────────────────────────────────────────────────────────────────────────────
+// Data fetching
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getBacktestData(): Promise<BacktestRow[]> {
+  if (!isSupabaseConfigured()) return []
+  try {
+    const supabase = getPublicClient()
+    const { data, error } = await supabase
+      .from('backtest_results')
+      .select('*')
+      .order('date', { ascending: true })
+
+    if (error) {
+      console.error('[AccuracyPage] backtest_results fetch error:', error.message)
+      return []
+    }
+    return (data as BacktestRow[]) || []
+  } catch (e) {
+    console.error('[AccuracyPage] backtest_results unexpected error:', e)
+    return []
+  }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Data fetching — server side with fallback to empty on error
-// ─────────────────────────────────────────────────────────────────────────────
 async function getAccuracySummary(): Promise<AccuracyRow[]> {
   if (!isSupabaseConfigured()) return []
   try {
@@ -79,45 +100,6 @@ async function getAccuracySummary(): Promise<AccuracyRow[]> {
   } catch (e) {
     console.error('[AccuracyPage] accuracy_summary unexpected error:', e)
     return []
-  }
-}
-
-async function getGradedPickStats(): Promise<LiveStats> {
-  const fallback: LiveStats = { total: 0, hits: 0, misses: 0, pushes: 0, mae: null }
-  if (!isSupabaseConfigured()) return fallback
-  try {
-    const supabase = getPublicClient()
-    const { data, error } = await supabase
-      .from('picks')
-      .select('grade, projected, actual')
-      .not('grade', 'is', null)
-
-    if (error || !data) {
-      console.error('[AccuracyPage] picks stats fetch error:', error?.message)
-      return fallback
-    }
-
-    const hits = data.filter((p: any) => p.grade?.toLowerCase() === 'hit').length
-    const misses = data.filter((p: any) => p.grade?.toLowerCase() === 'miss').length
-    const pushes = data.filter((p: any) => p.grade?.toLowerCase() === 'push').length
-
-    // Compute MAE from picks that have both projected and actual values
-    const gradedWithValues = data.filter(
-      (p: any) => p.projected != null && p.actual != null
-    )
-    let mae: number | null = null
-    if (gradedWithValues.length > 0) {
-      const totalAbsErr = gradedWithValues.reduce(
-        (sum: number, p: any) => sum + Math.abs(Number(p.actual) - Number(p.projected)),
-        0
-      )
-      mae = parseFloat((totalAbsErr / gradedWithValues.length).toFixed(2))
-    }
-
-    return { total: data.length, hits, misses, pushes, mae }
-  } catch (e) {
-    console.error('[AccuracyPage] picks stats unexpected error:', e)
-    return fallback
   }
 }
 
@@ -143,118 +125,353 @@ async function getRecentPicks(limit = 25): Promise<PickRow[]> {
   }
 }
 
+function aggregateBacktestSummary(rows: BacktestRow[]): PropSummary[] {
+  const byType: Record<string, {
+    total: number
+    correct: number
+    pl: number
+    edgeSum: number
+    tierA: number
+    tierB: number
+    tierC: number
+    count: number
+  }> = {}
+
+  for (const row of rows) {
+    if (row.prop_type === 'ALL') continue
+    if (!byType[row.prop_type]) {
+      byType[row.prop_type] = {
+        total: 0, correct: 0, pl: 0, edgeSum: 0,
+        tierA: 0, tierB: 0, tierC: 0, count: 0,
+      }
+    }
+    const b = byType[row.prop_type]
+    b.total += row.total_predictions || 0
+    b.correct += row.correct_predictions || 0
+    b.pl += row.profit_loss || 0
+    b.edgeSum += row.avg_edge || 0
+    b.tierA += row.tier_a_roi || 0
+    b.tierB += row.tier_b_roi || 0
+    b.tierC += row.tier_c_roi || 0
+    b.count += 1
+  }
+
+  return Object.entries(byType)
+    .map(([pt, b]) => ({
+      prop_type: pt,
+      total_predictions: b.total,
+      correct_predictions: b.correct,
+      accuracy_pct: b.total > 0
+        ? parseFloat(((b.correct / b.total) * 100).toFixed(1))
+        : 0,
+      avg_roi_pct: b.total > 0
+        ? parseFloat(((b.pl / b.total) * 100).toFixed(1))
+        : 0,
+      avg_edge: b.count > 0
+        ? parseFloat((b.edgeSum / b.count).toFixed(4))
+        : 0,
+      avg_tier_a_roi: b.count > 0
+        ? parseFloat((b.tierA / b.count).toFixed(1))
+        : 0,
+      avg_tier_b_roi: b.count > 0
+        ? parseFloat((b.tierB / b.count).toFixed(1))
+        : 0,
+      avg_tier_c_roi: b.count > 0
+        ? parseFloat((b.tierC / b.count).toFixed(1))
+        : 0,
+      total_profit_loss: parseFloat(b.pl.toFixed(2)),
+      brier_score: null,
+      days_tested: b.count,
+    }))
+    .sort((a, b) => b.total_predictions - a.total_predictions)
+}
+
+function buildPLTimeline(rows: BacktestRow[]): { date: string; pl: number; cumPL: number }[] {
+  const allRows = rows
+    .filter(r => r.prop_type === 'ALL')
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  let cumPL = 0
+  return allRows.map(r => {
+    cumPL += r.profit_loss || 0
+    return {
+      date: r.date,
+      pl: r.profit_loss || 0,
+      cumPL: Math.round(cumPL * 100) / 100,
+    }
+  })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 export default async function AccuracyPage() {
-  const [accuracyRows, liveStats, recentPicks] = await Promise.all([
+  const [backtestRows, accuracyRows, recentPicks] = await Promise.all([
+    getBacktestData(),
     getAccuracySummary(),
-    getGradedPickStats(),
     getRecentPicks(25),
   ])
 
-  const hasLiveData = liveStats.total > 0 || accuracyRows.length > 0
-  const d = BACKTEST_DATA
-  const acc = d.projectionAccuracy
+  const hasBacktestData = backtestRows.length > 0
+  const propSummaries = hasBacktestData ? aggregateBacktestSummary(backtestRows) : []
+  const plTimeline = hasBacktestData ? buildPLTimeline(backtestRows) : []
+  const hasLiveData = accuracyRows.length > 0
 
-  const liveHitRate =
-    liveStats.total > 0 && (liveStats.hits + liveStats.misses) > 0
-      ? ((liveStats.hits / (liveStats.hits + liveStats.misses)) * 100).toFixed(1)
-      : null
+  // Totals from backtest
+  const totalPreds = propSummaries.reduce((s, p) => s + p.total_predictions, 0)
+  const totalCorrect = propSummaries.reduce((s, p) => s + p.correct_predictions, 0)
+  const overallAccuracy = totalPreds > 0
+    ? ((totalCorrect / totalPreds) * 100).toFixed(1)
+    : '--'
+  const totalPL = propSummaries.reduce((s, p) => s + p.total_profit_loss, 0)
+  const overallROI = totalPreds > 0
+    ? ((totalPL / totalPreds) * 100).toFixed(1)
+    : '--'
+  const dateRange = hasBacktestData
+    ? `${backtestRows[0].date} to ${backtestRows[backtestRows.length - 1].date}`
+    : '--'
+
+  // Count unique dates
+  const uniqueDates = new Set(backtestRows.map(r => r.date)).size
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
+    <div className="max-w-6xl mx-auto px-4 py-8">
       {/* Page header */}
       <h1 className="text-3xl font-bold mb-2">Model Accuracy</h1>
       <p className="text-slate-400 mb-8">
-        Glass-box prop analytics — public accuracy tracking
+        Glass-box prop analytics — public accuracy tracking across 6 prop types
       </p>
 
-      {/* ── Live tracking banner ── */}
+      {/* ── Live 2026 tracking banner ── */}
       {hasLiveData ? (
         <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/50 border border-green-700/30 rounded-lg p-4 mb-6">
           <p className="text-sm font-semibold text-green-300">
-            2026 Live Tracking &middot; {liveStats.total.toLocaleString()} graded picks
-            {liveHitRate && <> &middot; {liveHitRate}% hit rate</>}
-            {liveStats.mae != null && <> &middot; MAE {liveStats.mae} K</>}
+            2026 Live Tracking &middot; {accuracyRows.reduce((s, r) => s + r.total_picks, 0).toLocaleString()} graded picks
           </p>
           <p className="text-xs text-slate-400 mt-1">
-            {liveStats.hits} hits &middot; {liveStats.misses} misses &middot; {liveStats.pushes} pushes
+            Live data refreshed daily at 2 AM ET via GitHub Actions
           </p>
         </div>
       ) : (
         <div className="bg-slate-800/40 border border-slate-700/30 rounded-lg p-4 mb-6">
           <p className="text-sm text-slate-400">
-            Live tracking begins Opening Day 2026. Showing 2025 backtest baseline below.
+            Live tracking begins Opening Day 2026. Showing backtest results below.
           </p>
         </div>
       )}
 
       {/* ── Backtest banner ── */}
-      <div className="bg-gradient-to-r from-blue-900/50 to-emerald-900/50 border border-blue-700/30 rounded-lg p-4 mb-8">
-        <p className="text-sm font-semibold text-blue-300">
-          {d.label} &middot; {d.totalProjections.toLocaleString()} projections &middot; {d.dateRange}
-        </p>
-        <p className="text-xs text-slate-400 mt-1">
-          {hasLiveData
-            ? 'Historical baseline — compare live 2026 performance against 2025 backtest'
-            : 'Live tracking begins Opening Day 2026'}
-        </p>
-      </div>
+      {hasBacktestData && (
+        <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 border border-blue-700/30 rounded-lg p-4 mb-8">
+          <p className="text-sm font-semibold text-blue-300">
+            Monte Carlo Backtest &middot; {totalPreds.toLocaleString()} predictions &middot; {dateRange}
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            {uniqueDates} game days &middot; {propSummaries.length} prop types &middot;
+            Simulated against actual MLB results
+          </p>
+        </div>
+      )}
 
       {/* ── Summary metric cards ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-10">
         <StatCard
-          label="GRADED PICKS"
-          value={liveStats.total > 0 ? liveStats.total.toLocaleString() : '--'}
-          sub={liveStats.total > 0 ? '2026 Season' : 'Tracking begins Opening Day 2026'}
+          label="PREDICTIONS"
+          value={totalPreds > 0 ? totalPreds.toLocaleString() : '--'}
+          sub="Aug-Sep 2025"
         />
         <StatCard
-          label="HIT RATE"
-          value={liveHitRate ? `${liveHitRate}%` : `${acc.within1k}%`}
-          sub={
-            liveHitRate
-              ? `${liveStats.hits} of ${liveStats.hits + liveStats.misses}`
-              : 'Backtest: within 1K'
-          }
+          label="ACCURACY"
+          value={overallAccuracy !== '--' ? `${overallAccuracy}%` : '--'}
+          sub="Overall hit rate"
         />
         <StatCard
-          label="MEAN ABS. ERROR"
-          value={
-            liveStats.mae != null ? `${liveStats.mae} K` : `${acc.meanAbsoluteError} K`
-          }
-          sub={liveStats.mae != null ? '2026 live data' : 'Backtest baseline'}
+          label="ROI"
+          value={overallROI !== '--' ? `${overallROI}%` : '--'}
+          sub="Flat $1 bets at -110"
+          highlight={Number(overallROI) > 0}
         />
         <StatCard
-          label="WITHIN 2K"
-          value={`${acc.within2k}%`}
-          sub="Backtest baseline"
+          label="PROP TYPES"
+          value={propSummaries.length > 0 ? String(propSummaries.length) : '--'}
+          sub="K, H, TB, HR, BB, RBI"
+        />
+        <StatCard
+          label="GAME DAYS"
+          value={uniqueDates > 0 ? String(uniqueDates) : '--'}
+          sub="Tested"
+        />
+        <StatCard
+          label="P/L (UNITS)"
+          value={totalPL !== 0 ? `${totalPL >= 0 ? '+' : ''}${totalPL.toFixed(1)}` : '--'}
+          sub="Total"
+          highlight={totalPL > 0}
         />
       </div>
 
-      {/* ── Win rate by stat type (live) ── */}
-      {accuracyRows.length > 0 && (
+      {/* ── Accuracy by Prop Type ── */}
+      {propSummaries.length > 0 && (
         <>
-          <h2 className="text-xl font-bold mb-4">Win Rate by Stat Type</h2>
+          <h2 className="text-xl font-bold mb-4">Accuracy by Prop Type</h2>
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg overflow-hidden mb-10">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-700/50">
+                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Prop Type</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Predictions</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Correct</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Accuracy</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">ROI</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Avg Edge</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Tier A ROI</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Tier B ROI</th>
+                    <th className="text-right px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Tier C ROI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {propSummaries.map((row) => (
+                    <tr
+                      key={row.prop_type}
+                      className="border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors"
+                    >
+                      <td className="px-4 py-3 font-medium">
+                        <span className="inline-flex items-center gap-2">
+                          <PropBadge type={row.prop_type} />
+                          {PROP_LABELS[row.prop_type] || row.prop_type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-300">
+                        {row.total_predictions.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-300">
+                        {row.correct_predictions.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={
+                          row.accuracy_pct >= 55 ? 'text-green-400 font-semibold'
+                            : row.accuracy_pct >= 50 ? 'text-blue-400'
+                            : 'text-red-400'
+                        }>
+                          {row.accuracy_pct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={
+                          row.avg_roi_pct > 0 ? 'text-green-400 font-semibold'
+                            : row.avg_roi_pct < -5 ? 'text-red-400'
+                            : 'text-slate-400'
+                        }>
+                          {row.avg_roi_pct > 0 ? '+' : ''}{row.avg_roi_pct.toFixed(1)}%
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-400">
+                        {(row.avg_edge * 100).toFixed(1)}%
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <TierROI value={row.avg_tier_a_roi} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <TierROI value={row.avg_tier_b_roi} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <TierROI value={row.avg_tier_c_roi} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Cumulative P/L Chart (CSS-only) ── */}
+      {plTimeline.length > 0 && (
+        <>
+          <h2 className="text-xl font-bold mb-4">Cumulative Profit/Loss</h2>
+          <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-6 mb-10">
+            <div className="flex items-end gap-px h-48 overflow-hidden">
+              {plTimeline.map((d, i) => {
+                const maxAbs = Math.max(...plTimeline.map(t => Math.abs(t.cumPL)), 1)
+                const height = Math.abs(d.cumPL) / maxAbs * 100
+                const isPositive = d.cumPL >= 0
+                return (
+                  <div
+                    key={i}
+                    className="flex-1 min-w-[2px] relative group"
+                    style={{ height: '100%' }}
+                  >
+                    <div
+                      className={`absolute bottom-1/2 w-full ${
+                        isPositive ? 'bg-green-500/70' : 'bg-red-500/70'
+                      }`}
+                      style={{
+                        height: `${height / 2}%`,
+                        bottom: isPositive ? '50%' : undefined,
+                        top: isPositive ? undefined : '50%',
+                      }}
+                    />
+                    <div className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs whitespace-nowrap z-10">
+                      {d.date}: {d.cumPL >= 0 ? '+' : ''}{d.cumPL.toFixed(1)}u
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="flex justify-between text-xs text-slate-500 mt-2">
+              <span>{plTimeline[0]?.date}</span>
+              <span>{plTimeline[plTimeline.length - 1]?.date}</span>
+            </div>
+            <div className="text-center text-xs text-slate-500 mt-1">
+              Final: <span className={totalPL >= 0 ? 'text-green-400' : 'text-red-400'}>
+                {totalPL >= 0 ? '+' : ''}{totalPL.toFixed(1)} units
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── ROI by Confidence Tier (Aggregated) ── */}
+      {propSummaries.length > 0 && (
+        <>
+          <h2 className="text-xl font-bold mb-4">ROI by Confidence Tier</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
+            <TierCard
+              tier="A"
+              label="High Confidence"
+              description="Edge 10%+"
+              roi={propSummaries.reduce((s, p) => s + p.avg_tier_a_roi, 0) / Math.max(propSummaries.length, 1)}
+            />
+            <TierCard
+              tier="B"
+              label="Medium Confidence"
+              description="Edge 5-10%"
+              roi={propSummaries.reduce((s, p) => s + p.avg_tier_b_roi, 0) / Math.max(propSummaries.length, 1)}
+            />
+            <TierCard
+              tier="C"
+              label="Low Confidence"
+              description="Edge 0-5%"
+              roi={propSummaries.reduce((s, p) => s + p.avg_tier_c_roi, 0) / Math.max(propSummaries.length, 1)}
+            />
+          </div>
+        </>
+      )}
+
+      {/* ── Live Win Rate by Stat Type (if available) ── */}
+      {hasLiveData && accuracyRows.length > 0 && (
+        <>
+          <h2 className="text-xl font-bold mb-4">2026 Live Win Rate by Stat Type</h2>
           <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg overflow-hidden mb-10">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-700/50">
-                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                    Prop Type
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                    Picks
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                    Hit Rate
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                    Avg Edge
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                    Avg CLV
-                  </th>
+                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Prop Type</th>
+                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Picks</th>
+                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Hit Rate</th>
+                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Avg Edge</th>
+                  <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Avg CLV</th>
                 </tr>
               </thead>
               <tbody>
@@ -268,15 +485,11 @@ export default async function AccuracyPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-300">{row.total_picks}</td>
                     <td className="px-4 py-3">
-                      <span
-                        className={
-                          row.hit_rate >= 55
-                            ? 'text-green-400 font-semibold'
-                            : row.hit_rate >= 50
-                            ? 'text-blue-400'
-                            : 'text-red-400'
-                        }
-                      >
+                      <span className={
+                        row.hit_rate >= 55 ? 'text-green-400 font-semibold'
+                          : row.hit_rate >= 50 ? 'text-blue-400'
+                          : 'text-red-400'
+                      }>
                         {row.hit_rate.toFixed(1)}%
                       </span>
                     </td>
@@ -294,7 +507,7 @@ export default async function AccuracyPage() {
         </>
       )}
 
-      {/* ── Recent graded picks table ── */}
+      {/* ── Recent Graded Picks ── */}
       {recentPicks.length > 0 && (
         <>
           <h2 className="text-xl font-bold mb-4">Recent Graded Picks</h2>
@@ -303,27 +516,13 @@ export default async function AccuracyPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-700/50">
-                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Date
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Player
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Stat
-                    </th>
-                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Line
-                    </th>
-                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Projected
-                    </th>
-                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Actual
-                    </th>
-                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                      Grade
-                    </th>
+                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Date</th>
+                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Player</th>
+                    <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Stat</th>
+                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Line</th>
+                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Projected</th>
+                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Actual</th>
+                    <th className="text-center px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">Grade</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -335,8 +534,7 @@ export default async function AccuracyPage() {
                       <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">
                         {pick.game_date
                           ? new Date(pick.game_date + 'T00:00:00').toLocaleDateString(
-                              'en-US',
-                              { month: 'short', day: 'numeric' }
+                              'en-US', { month: 'short', day: 'numeric' }
                             )
                           : '--'}
                       </td>
@@ -355,9 +553,7 @@ export default async function AccuracyPage() {
                       <td className="px-4 py-3 text-center">
                         {pick.actual != null ? (
                           <span className="font-semibold">{pick.actual}</span>
-                        ) : (
-                          '--'
-                        )}
+                        ) : '--'}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <GradeBadge grade={pick.grade} />
@@ -371,56 +567,19 @@ export default async function AccuracyPage() {
         </>
       )}
 
-      {/* ── Model Validation: 2025 Backtest ── */}
-      <h2 className="text-xl font-bold mb-1">Model Validation</h2>
-      <p className="text-sm text-slate-400 mb-4">
-        2025 season backtest — {d.totalProjections.toLocaleString()} pitcher strikeout projections
-        across {d.daysWithGames} game days. MAE baseline:{' '}
-        <span className="text-white font-semibold">{acc.meanAbsoluteError} K</span>.
-      </p>
-      <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg overflow-hidden mb-6">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-700/50">
-              <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                Accuracy Tier
-              </th>
-              <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                Rate
-              </th>
-              <th className="text-left px-4 py-3 text-xs text-slate-400 uppercase tracking-wider">
-                Projections
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <TierRow
-              label="Within 1 Strikeout"
-              rate={acc.within1k}
-              count={Math.round((d.totalProjections * acc.within1k) / 100)}
-            />
-            <TierRow
-              label="Within 2 Strikeouts"
-              rate={acc.within2k}
-              count={Math.round((d.totalProjections * acc.within2k) / 100)}
-            />
-            <TierRow
-              label="Within 3 Strikeouts"
-              rate={acc.within3k}
-              count={Math.round((d.totalProjections * acc.within3k) / 100)}
-            />
-          </tbody>
-        </table>
-      </div>
+      {/* ── No data fallback ── */}
+      {!hasBacktestData && !hasLiveData && (
+        <div className="text-center py-16">
+          <p className="text-slate-400 text-lg mb-2">No accuracy data available yet</p>
+          <p className="text-slate-500 text-sm">
+            Run the backtest: <code className="bg-slate-800 px-2 py-0.5 rounded text-xs">
+              python scripts/backtest_full_aug_sep.py --upload
+            </code>
+          </p>
+        </div>
+      )}
 
-      {/* Backtest meta row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-10">
-        <MetaCard label="Mean Abs. Error" value={`${acc.meanAbsoluteError} K`} />
-        <MetaCard label="Median Error" value={`${acc.medianError} K`} />
-        <MetaCard label="Season" value={d.season} />
-        <MetaCard label="Model" value={d.model} />
-      </div>
-
+      {/* Footer */}
       <p className="text-center text-xs text-slate-500 mt-8">
         Data updates daily at 2 AM ET via GitHub Actions &middot;{' '}
         <a
@@ -433,15 +592,24 @@ export default async function AccuracyPage() {
         </a>
       </p>
       <p className="text-center text-xs text-slate-500 mt-1">
-        Powered by Statcast, MLB Stats API, and The Odds API
+        Powered by Statcast, MLB Stats API, and Monte Carlo Simulation
       </p>
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Stat label map
+// Label maps
 // ─────────────────────────────────────────────────────────────────────────────
+const PROP_LABELS: Record<string, string> = {
+  K: 'Strikeouts',
+  H: 'Hits',
+  TB: 'Total Bases',
+  HR: 'Home Runs',
+  BB: 'Walks',
+  RBI: 'RBIs',
+}
+
 const STAT_LABELS: Record<string, string> = {
   pitcher_strikeouts: 'Pitcher Strikeouts (K)',
   batter_hits: 'Hits',
@@ -453,56 +621,90 @@ const STAT_LABELS: Record<string, string> = {
   pitcher_hits_allowed: 'Hits Allowed',
   pitcher_earned_runs: 'Earned Runs',
   pitcher_outs: 'Outs Recorded',
+  K: 'Strikeouts',
+  H: 'Hits',
+  TB: 'Total Bases',
+  HR: 'Home Runs',
+  BB: 'Walks',
+  RBI: 'RBIs',
+}
+
+const PROP_COLORS: Record<string, string> = {
+  K: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  H: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  TB: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+  HR: 'bg-red-500/20 text-red-400 border-red-500/30',
+  BB: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+  RBI: 'bg-green-500/20 text-green-400 border-green-500/30',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UI components
 // ─────────────────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
+function StatCard({
+  label, value, sub, highlight,
+}: {
+  label: string; value: string; sub: string; highlight?: boolean
+}) {
   return (
     <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4">
       <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-3xl font-bold">{value}</p>
+      <p className={`text-2xl font-bold ${highlight ? 'text-green-400' : ''}`}>{value}</p>
       <p className="text-xs text-slate-500 mt-1">{sub}</p>
     </div>
   )
 }
 
-function MetaCard({ label, value }: { label: string; value: string }) {
+function PropBadge({ type }: { type: string }) {
+  const colors = PROP_COLORS[type] || 'bg-slate-500/20 text-slate-400 border-slate-500/30'
   return (
-    <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-3 text-center">
-      <p className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</p>
-      <p className="text-sm font-semibold text-slate-200">{value}</p>
-    </div>
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold border ${colors}`}>
+      {type}
+    </span>
   )
 }
 
-function TierRow({
-  label,
-  rate,
-  count,
-}: {
-  label: string
-  rate: number
-  count: number
-}) {
-  const barWidth = `${rate}%`
+function TierROI({ value }: { value: number }) {
+  if (value === 0 || value == null) return <span className="text-slate-500">--</span>
   return (
-    <tr className="border-b border-slate-700/30">
-      <td className="px-4 py-3">{label}</td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 bg-slate-700/50 rounded-full h-1.5 max-w-[80px]">
-            <div
-              className="bg-green-500 h-1.5 rounded-full"
-              style={{ width: barWidth }}
-            />
-          </div>
-          <span className="text-green-400 font-medium">{rate}%</span>
-        </div>
-      </td>
-      <td className="px-4 py-3 text-slate-400">{count.toLocaleString()}</td>
-    </tr>
+    <span className={
+      value > 0 ? 'text-green-400 font-semibold'
+        : value < -5 ? 'text-red-400'
+        : 'text-slate-400'
+    }>
+      {value > 0 ? '+' : ''}{value.toFixed(1)}%
+    </span>
+  )
+}
+
+function TierCard({
+  tier, label, description, roi,
+}: {
+  tier: string; label: string; description: string; roi: number
+}) {
+  const tierColors: Record<string, string> = {
+    A: 'from-green-900/30 to-green-900/10 border-green-700/30',
+    B: 'from-blue-900/30 to-blue-900/10 border-blue-700/30',
+    C: 'from-slate-800/30 to-slate-800/10 border-slate-700/30',
+  }
+  const tierTextColors: Record<string, string> = {
+    A: 'text-green-400',
+    B: 'text-blue-400',
+    C: 'text-slate-400',
+  }
+
+  return (
+    <div className={`bg-gradient-to-br ${tierColors[tier]} border rounded-lg p-5`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`text-2xl font-bold ${tierTextColors[tier]}`}>Tier {tier}</span>
+        <span className="text-xs text-slate-500">{description}</span>
+      </div>
+      <p className="text-sm text-slate-400 mb-3">{label}</p>
+      <p className={`text-3xl font-bold ${roi > 0 ? 'text-green-400' : roi < -5 ? 'text-red-400' : 'text-slate-300'}`}>
+        {roi > 0 ? '+' : ''}{roi.toFixed(1)}%
+      </p>
+      <p className="text-xs text-slate-500 mt-1">Average ROI</p>
+    </div>
   )
 }
 
@@ -530,7 +732,5 @@ function GradeBadge({ grade }: { grade: string | null }) {
       </span>
     )
   }
-  return (
-    <span className="text-slate-400 text-xs">{grade}</span>
-  )
+  return <span className="text-slate-400 text-xs">{grade}</span>
 }
