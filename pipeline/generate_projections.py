@@ -20,12 +20,13 @@ for games where the MLB Stats API lacks probable pitcher data
 (e.g., WBC, exhibitions).
 """
 
-import os
 import json
 import logging
-import requests
+import os
 from datetime import date, timedelta
-from typing import Optional
+
+import requests
+
 # from dotenv import load_dotenv  # DISABLED - GitHub Actions provides env vars
 # load_dotenv()
 
@@ -578,7 +579,7 @@ def run_projections(game_date=None):
 
     log.info(f"Generated {len(projection_rows)} projections")
     sb_upsert("projections", projection_rows)
-    log.info(f"=== Done ===")
+    log.info("=== Done ===")
 
 if __name__ == "__main__":
     import sys
