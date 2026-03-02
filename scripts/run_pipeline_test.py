@@ -146,7 +146,7 @@ def main():
     if success:
         print("""
         🎉 SUCCESS! All Week 1 pipelines are operational.
-        
+
         Next steps:
         1. Check GitHub Actions logs for automated runs
         2. View dashboard at: https://nrlefty5.github.io/baselinemlb
@@ -156,7 +156,7 @@ def main():
     else:
         print("""
         ⚠️  SOME TESTS FAILED
-        
+
         Troubleshooting:
         1. Verify .env file has correct credentials
         2. Check Supabase project is active
