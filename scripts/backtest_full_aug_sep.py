@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-backtest_full_aug_sep.py — BaselineMLB
+backtest_full_aug_sep.py -- BaselineMLB
 ======================================
-Expanded backtesting engine covering ALL Aug–Sep 2025 MLB regular-season games.
+Expanded backtesting engine covering ALL Aug-Sep 2025 MLB regular-season games.
 
 For each game day this script:
   1. Fetches actual box-score stats from the MLB Stats API.
@@ -34,8 +34,7 @@ import os
 import sys
 import time
 from collections import defaultdict
-from datetime import date, datetime, timedelta
-from typing import Any
+from datetime import datetime, timedelta
 
 import numpy as np
 import requests
@@ -95,7 +94,7 @@ EDGE_BUCKETS = [
     (0.20, 1.00, "20%+"),
 ]
 
-# Expanded park K factors — all 30 MLB stadiums
+# Expanded park K factors -- all 30 MLB stadiums
 PARK_K_FACTORS = {
     "Chase Field": 1, "Truist Park": 2, "Camden Yards": 0,
     "Fenway Park": -1, "Wrigley Field": -3, "Guaranteed Rate Field": 0,
@@ -275,7 +274,7 @@ def fetch_pitcher_career_k9(pitcher_id: int) -> float:
 
 
 # ===========================================================================
-# Monte Carlo simulation — lightweight but realistic
+# Monte Carlo simulation -- lightweight but realistic
 # ===========================================================================
 
 def simulate_pitcher_ks(
@@ -308,7 +307,7 @@ def simulate_batter_stat(
     """
     Simulate a batter stat using PA-level Poisson/Binomial model.
 
-    For H, TB, HR, BB, RBI — estimate per-PA rates from MLB averages
+    For H, TB, HR, BB, RBI -- estimate per-PA rates from MLB averages
     and adjust for park factors.
     """
     rng = np.random.default_rng()
@@ -334,14 +333,14 @@ def simulate_batter_stat(
     pa_draws = np.clip(rng.normal(pa_val, 0.5, n_sims), 1, 7).astype(int)
 
     if stat_type == "HR":
-        # Binomial — either you hit one or you don't
+        # Binomial -- either you hit one or you don't
         samples = rng.binomial(pa_draws, min(rate, 0.15))
     elif stat_type == "TB":
-        # TB has higher variance — use Poisson on expected TB
+        # TB has higher variance -- use Poisson on expected TB
         lam = rate * pa_draws
         samples = rng.poisson(np.maximum(lam, 0.1))
     else:
-        # H, BB, RBI — Poisson approximation
+        # H, BB, RBI -- Poisson approximation
         lam = rate * pa_draws
         samples = rng.poisson(np.maximum(lam, 0.1))
 
@@ -700,7 +699,7 @@ def upload_backtest_results(daily_data: dict[str, dict[str, dict]]) -> int:
     Returns number of rows upserted.
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
-        logger.warning("SUPABASE_URL or SUPABASE_SERVICE_KEY not set — skipping upload")
+        logger.warning("SUPABASE_URL or SUPABASE_SERVICE_KEY not set -- skipping upload")
         return 0
 
     rows = []
@@ -783,8 +782,8 @@ def run_backtest(
     os.makedirs(output_dir, exist_ok=True)
 
     logger.info("=" * 65)
-    logger.info("BaselineMLB — Full Aug-Sep 2025 Backtest")
-    logger.info("  Date range : %s → %s", start_date, end_date)
+    logger.info("BaselineMLB -- Full Aug-Sep 2025 Backtest")
+    logger.info("  Date range : %s -> %s", start_date, end_date)
     logger.info("  Simulations: %d per player", N_SIMS)
     logger.info("  Prop types : %s", ", ".join(PROP_TYPES))
     logger.info("  Upload     : %s", upload)
@@ -825,7 +824,7 @@ def run_backtest(
     for i, game_info in enumerate(all_games, 1):
         if i % 25 == 0 or i == 1:
             logger.info(
-                "[%d/%d] Processing game_pk=%d (%s) — %d predictions so far",
+                "[%d/%d] Processing game_pk=%d (%s) -- %d predictions so far",
                 i, len(all_games), game_info["game_pk"],
                 game_info["game_date"], len(all_predictions),
             )
@@ -836,7 +835,7 @@ def run_backtest(
             games_processed += 1
         except Exception as exc:
             logger.warning(
-                "Failed game_pk=%d: %s — skipping",
+                "Failed game_pk=%d: %s -- skipping",
                 game_info["game_pk"], exc,
             )
             games_failed += 1
@@ -890,24 +889,24 @@ def run_backtest(
     summary_path = os.path.join(output_dir, "backtest_summary_aug_sep_2025.json")
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2, default=str)
-    logger.info("Wrote summary → %s", summary_path)
+    logger.info("Wrote summary -> %s", summary_path)
 
     # Save per-prediction detail (for debugging)
     detail_path = os.path.join(output_dir, "backtest_predictions_aug_sep_2025.json")
     with open(detail_path, "w") as f:
         json.dump(all_predictions[:1000], f, indent=2, default=str)  # First 1000 for size
-    logger.info("Wrote prediction sample → %s", detail_path)
+    logger.info("Wrote prediction sample -> %s", detail_path)
 
     # Upload to Supabase
     if upload and not dry_run:
         n_upserted = upload_backtest_results(by_date)
         logger.info("Uploaded %d rows to backtest_results", n_upserted)
     elif dry_run:
-        logger.info("DRY RUN — no data uploaded")
+        logger.info("DRY RUN -- no data uploaded")
 
     # Print summary
     print("\n" + "=" * 65)
-    print("  BASELINEMLB — BACKTEST RESULTS (Aug-Sep 2025)")
+    print("  BASELINEMLB -- BACKTEST RESULTS (Aug-Sep 2025)")
     print("=" * 65)
     print(f"\n  Games: {games_processed}  |  Predictions: {len(all_predictions)}")
     print(f"\n  {'Prop':>4s}  {'Total':>7s}  {'Correct':>7s}  {'Acc%':>6s}  {'MAE':>6s}  {'Brier':>7s}")
@@ -923,7 +922,7 @@ def run_backtest(
                 f"{m['brier_score'] or 0:>7.4f}"
             )
 
-    print(f"\n  ROI by Confidence Tier:")
+    print("\n  ROI by Confidence Tier:")
     for pt in PROP_TYPES:
         if pt in by_type and by_type[pt]["roi_by_tier"]:
             tiers = by_type[pt]["roi_by_tier"]
