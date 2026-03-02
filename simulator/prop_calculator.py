@@ -34,12 +34,11 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
-from typing import Any
+from datetime import date
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import requests
-from scipy import stats as scipy_stats
 
 from .monte_carlo_engine import SimulationSummary
 
@@ -53,7 +52,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Stat-type normalisation (Odds API → internal engine names)
+# Stat-type normalisation (Odds API -> internal engine names)
 # ---------------------------------------------------------------------------
 
 _PROP_TO_SIM_STAT: dict[str, str] = {
@@ -206,9 +205,9 @@ class PropEdge:
     under_prob:
         Simulated P(stat < line).
     best_direction:
-        ``"over"`` or ``"under"`` — direction with positive edge.
+        ``"over"`` or ``"under"`` -- direction with positive edge.
     edge_pct:
-        Edge percentage (simulated_prob − implied_prob), as a fraction.
+        Edge percentage (simulated_prob - implied_prob), as a fraction.
     kelly_fraction:
         Kelly-criterion bet size, already scaled by ``kelly_multiplier``.
     wager_pct:
@@ -379,8 +378,8 @@ def bootstrap_confidence(
         else:
             boot_probs[i] = np.mean(sample < threshold)
     se = float(np.std(boot_probs))
-    # Map std-error to a 0–1 confidence score (lower SE = higher confidence)
-    # SE of 0 → 1.0 confidence; SE of 0.1 → ~0.0 confidence
+    # Map std-error to a 0-1 confidence score (lower SE = higher confidence)
+    # SE of 0 -> 1.0 confidence; SE of 0.1 -> ~0.0 confidence
     return float(max(0.0, 1.0 - se / 0.10))
 
 
@@ -637,7 +636,7 @@ class PropCalculator:
         1. Retrieve the simulated outcome distribution from *sim_summary*.
         2. Compute P(over) and P(under) empirically.
         3. Convert sportsbook odds to no-vig fair probabilities.
-        4. Compute edge = simulated_prob − implied_prob.
+        4. Compute edge = simulated_prob - implied_prob.
         5. Size with Kelly criterion (fractional).
         6. Attach glass-box explanation.
 
@@ -710,12 +709,10 @@ class PropCalculator:
         if over_edge >= under_edge:
             best_dir = "over"
             best_edge = over_edge
-            best_sim_prob = sim_over
             best_odds = prop.over_odds
         else:
             best_dir = "under"
             best_edge = under_edge
-            best_sim_prob = sim_under
             best_odds = prop.under_odds
 
         dec_odds = american_to_decimal(best_odds)
@@ -828,7 +825,7 @@ class PropCalculator:
         if not edges:
             return "No edges found above threshold.\n"
         sep = "-" * 60
-        parts = [sep, f"  PROP EDGE REPORT — {len(edges)} edges found", sep]
+        parts = [sep, f"  PROP EDGE REPORT -- {len(edges)} edges found", sep]
         for i, e in enumerate(edges, 1):
             sim_p = e.over_prob if e.best_direction == "over" else e.under_prob
             parts.append(
@@ -908,9 +905,8 @@ if __name__ == "__main__":
 # New interfaces expected by test_simulator.py
 # ===========================================================================
 
-from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from .monte_carlo_engine import PlayerSimResults, GameSimResults
+    from .monte_carlo_engine import GameSimResults, PlayerSimResults
 
 
 def remove_vig(over_odds: int, under_odds: int) -> tuple[float, float]:
@@ -926,8 +922,8 @@ def remove_vig(over_odds: int, under_odds: int) -> tuple[float, float]:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class PropLine:  # type: ignore[no-redef]
-    """Sportsbook prop line — new interface used by tests.
+class PropLine:  # type: ignore[no-redef]  # noqa: F811
+    """Sportsbook prop line -- new interface used by tests.
 
     Attributes
     ----------
@@ -957,8 +953,8 @@ class PropLine:  # type: ignore[no-redef]
 # ---------------------------------------------------------------------------
 
 @dataclass
-class PropEdge:  # type: ignore[no-redef]
-    """Analysed prop line — new interface used by tests.
+class PropEdge:  # type: ignore[no-redef]  # noqa: F811
+    """Analysed prop line -- new interface used by tests.
 
     Attributes
     ----------
@@ -1160,7 +1156,7 @@ class PropCalculator:  # type: ignore[no-redef]
 
         Returns edges sorted by absolute edge descending.
         """
-        from .monte_carlo_engine import PlayerSimResults as _PSR, N_OUTCOMES, MLB_AVG_PROBS
+        from .monte_carlo_engine import PlayerSimResults as _PSR
 
         edges: list[PropEdge] = []
 
@@ -1245,7 +1241,7 @@ class PropCalculator:  # type: ignore[no-redef]
     def format_summary(self, edges: list["PropEdge"]) -> str:
         """Return a plain-text summary of the top edges."""
         if not edges:
-            return "BaselineMLB — No edges found.\n"
+            return "BaselineMLB -- No edges found.\n"
         sep = "-" * 60
         lines = [sep, "  BaselineMLB Prop Edge Summary", sep]
         for i, e in enumerate(edges, 1):
