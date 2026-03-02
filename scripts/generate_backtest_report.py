@@ -608,7 +608,7 @@ def chart_accuracy_heatmap(
     _apply_style(style)
 
     acc = summary.get("accuracy_by_type", {})
-    roi = summary.get("roi_by_tier", {})
+    summary.get("roi_by_tier", {})
     brier = summary.get("brier_scores", {})
 
     prop_types = sorted(acc.keys())
@@ -1189,7 +1189,7 @@ def build_markdown_report(
     for pt in prop_types:
         a = acc.get(pt, {})
         b = brier_data.get(pt, {})
-        r = roi_tier.get(pt, {})  # ROI by type isn't standard, use tier-level as fallback
+        roi_tier.get(pt, {})  # ROI by type isn't standard, use tier-level as fallback
         # Try to find an ROI-like figure from tier data (approximate)
         acc_rows.append(
             f"| {PROP_LABELS.get(pt, pt)} ({pt}) "
@@ -1269,11 +1269,11 @@ across MAE, ROI%, and Brier score for each prop type.
 
     report = f"""# BaselineMLB Monte Carlo Backtest Report
 {demo_banner}
-**Generated:** {timestamp}  
-**Date Range:** {date_start} to {date_end}  
-**Model:** Monte Carlo Simulator v1.0  
-**Simulations per game:** {sims:,}  
-**Total Predictions:** {total_preds:,}  
+**Generated:** {timestamp}
+**Date Range:** {date_start} to {date_end}
+**Model:** Monte Carlo Simulator v1.0
+**Simulations per game:** {sims:,}
+**Total Predictions:** {total_preds:,}
 **Umpire factor:** {umpire_note} | **Weather factor:** {weather_note}
 
 ---
@@ -1294,8 +1294,8 @@ across MAE, ROI%, and Brier score for each prop type.
 |-----------|------------|-----|----------|----------|-------|-------------|
 {chr(10).join(acc_rows)}
 
-> **MAE** = mean absolute error (projected vs actual).  
-> **Within 1 / Within 2** = % of predictions within 1 or 2 of the actual value.  
+> **MAE** = mean absolute error (projected vs actual).
+> **Within 1 / Within 2** = % of predictions within 1 or 2 of the actual value.
 > **Skill Score** = 1 − (Brier / Naive Brier); positive = better than baseline.
 
 ---
@@ -1317,7 +1317,7 @@ indicate over-confidence.
 
 ![Cumulative P/L Over Time]({chart_ref('cumulative_pnl.png')})
 
-> Kelly criterion at quarter-Kelly (25%) on edges > 3%, capped at 5% of bankroll.  
+> Kelly criterion at quarter-Kelly (25%) on edges > 3%, capped at 5% of bankroll.
 > Standard juice assumed: −110 (implied 52.4% breakeven).
 
 ### ROI by Confidence Tier
@@ -1346,8 +1346,8 @@ indicate over-confidence.
 |------|----------|-------------|-------------|
 {chr(10).join(brier_rows)}
 
-> **Brier Score** = mean squared error of probability forecasts (lower = better).  
-> **Naive Brier** = score of a 50/50 coin-flip baseline (0.25).  
+> **Brier Score** = mean squared error of probability forecasts (lower = better).
+> **Naive Brier** = score of a 50/50 coin-flip baseline (0.25).
 > **Skill Score** = 1 − (Brier / Naive); positive means the model beats the baseline.
 
 ---
