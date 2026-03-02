@@ -1,1 +1,10 @@
-PLACEHOLDER_WILL_BE_REPLACED
+tree
+version=v4
+num_class=8
+num_tree_per_iteration=8
+label_index=0
+max_feature_idx=39
+objective=multiclass num_class=8
+average_output=False
+feature_names=pitch_speed_mean pitch_spin_mean plate_x_mean plate_z_mean pfx_x_mean pfx_z_mean release_pos_x_mean release_pos_y_mean release_pos_z_mean extension_mean pitcher_k_rate pitcher_bb_rate pitcher_hr_rate pitcher_gb_rate pitcher_fb_rate pitcher_whiff_rate pitcher_csw_rate pitcher_hard_hit_rate pitcher_barrel_rate batter_k_rate batter_bb_rate batter_hr_rate batter_gb_rate batter_fb_rate batter_hard_hit_rate batter_barrel_rate batter_avg batter_obp batter_slg batter_ops platoon_advantage park_factor_hr park_factor_r inning outs_when_up balls strikes on_1b on_2b on_3b
+feature_names_by_idx=0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39
