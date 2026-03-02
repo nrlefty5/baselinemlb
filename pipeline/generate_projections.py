@@ -418,13 +418,20 @@ def project_pitcher(mlbam_id, player_name, opponent, venue, game_pk=None):
 
     # Confidence scoring
     conf = 0.50
-    if expected_ip >= 5.0: conf += 0.10
-    if career_k9 > 0: conf += 0.10
-    if career_k9 >= 9.0: conf += 0.05
-    if recent_k9 is not None: conf += 0.05   # More confident with recent data
-    if umpire_sr is not None: conf += 0.03   # More confident with umpire data
-    if catcher_cs is not None: conf += 0.02  # More confident with catcher data
-    if opp_k_pct != MLB_AVG_K_PCT: conf += 0.03  # Have actual team data
+    if expected_ip >= 5.0:
+        conf += 0.10
+    if career_k9 > 0:
+        conf += 0.10
+    if career_k9 >= 9.0:
+        conf += 0.05
+    if recent_k9 is not None:
+        conf += 0.05  # More confident with recent data
+    if umpire_sr is not None:
+        conf += 0.03  # More confident with umpire data
+    if catcher_cs is not None:
+        conf += 0.02  # More confident with catcher data
+    if opp_k_pct != MLB_AVG_K_PCT:
+        conf += 0.03  # Have actual team data
     conf = round(min(conf, 0.95), 3)
 
     features = {

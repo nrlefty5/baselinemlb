@@ -1,523 +1,243 @@
 """
 config.py — BaselineMLB Monte Carlo Simulator
-Central configuration module.
+=============================================
+Central configuration constants for the simulation engine.
 
-All tuning parameters, feature definitions, park factors, league averages,
-and environment-backed secrets live here. Import from this module to keep
-the rest of the codebase free of magic numbers.
+All magic numbers that influence simulation behaviour are
+defined here so they can be found and tweaked in one place.
 """
 
 from __future__ import annotations
 
-import logging
-import os
-import sys
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Dict, List, Optional
-
-# ---------------------------------------------------------------------------
-# Attempt to load .env file if python-dotenv is available
-# ---------------------------------------------------------------------------
-try:
-    from dotenv import load_dotenv  # type: ignore
-
-    load_dotenv()
-except ImportError:
-    pass  # dotenv is optional; fall back to real environment variables
-
+from typing import Optional
 
 # ===========================================================================
-# 1. SimulationConfig dataclass
+# Simulation meta
+# ===========================================================================
+
+#: Default number of Monte Carlo iterations per game
+DEFAULT_N_SIMS: int = 10_000
+
+#: Seed used when reproducibility is requested (None = fully random)
+DEFAULT_SEED: Optional[int] = None
+
+#: Number of innings in a regulation game
+INNINGS_PER_GAME: int = 9
+
+#: Maximum extra innings before simulation declares a tie
+MAX_EXTRA_INNINGS: int = 10
+
+#: Outs per inning
+OUTS_PER_INNING: int = 3
+
+#: Size of the batting lineup
+LINEUP_SIZE: int = 9
+
+# ===========================================================================
+# League-average rates (2024 MLB season)
+# ===========================================================================
+
+#: League-average strikeout percentage
+MLB_AVG_K_PCT: float = 0.224
+
+#: League-average walk percentage
+MLB_AVG_BB_PCT: float = 0.085
+
+#: League-average hit-by-pitch percentage
+MLB_AVG_HBP_PCT: float = 0.009
+
+#: League-average batting average on balls in play
+MLB_AVG_BABIP: float = 0.300
+
+#: League-average batting average
+MLB_AVG_BA: float = 0.243
+
+#: League-average on-base percentage
+MLB_AVG_OBP: float = 0.315
+
+#: League-average slugging percentage
+MLB_AVG_SLG: float = 0.392
+
+#: League-average home-run-per-fly-ball rate
+MLB_AVG_HR_PER_FB: float = 0.138
+
+#: League-average fly-ball percentage
+MLB_AVG_FB_PCT: float = 0.360
+
+#: League-average ground-ball percentage
+MLB_AVG_GB_PCT: float = 0.440
+
+#: League-average line-drive percentage
+MLB_AVG_LD_PCT: float = 0.200
+
+#: League-average hard-hit percentage on balls in play
+MLB_AVG_HARD_HIT_PCT: float = 0.380
+
+#: League-average K/9 for starters
+MLB_AVG_STARTER_K9: float = 8.5
+
+#: Typical starter expected innings pitched
+MLB_AVG_STARTER_IP: float = 5.5
+
+# ===========================================================================
+# Park factors
+# ===========================================================================
+
+# Strikeout adjustment per ballpark (percentage points, ± from league average)
+# Positive = park suppresses contact / boosts Ks
+PARK_K_FACTORS: dict[str, int] = {
+    "Coors Field": -8,
+    "Yankee Stadium": 3,
+    "Oracle Park": 5,
+    "Petco Park": 4,
+    "Truist Park": 2,
+    "Globe Life Field": 2,
+    "Chase Field": 1,
+    "T-Mobile Park": 3,
+    "Guaranteed Rate Field": 0,
+    "loanDepot park": 1,
+    "Great American Ball Park": -2,
+    "PNC Park": 1,
+    "Minute Maid Park": 2,
+    "Dodger Stadium": 4,
+    "Angel Stadium": 0,
+    "Fenway Park": -1,
+    "Wrigley Field": -3,
+    "Busch Stadium": 1,
+    "Citizens Bank Park": -2,
+}
+
+# Run-scoring park factor (1.0 = neutral, >1 = hitter-friendly)
+PARK_RUN_FACTORS: dict[str, float] = {
+    "Coors Field": 1.28,
+    "Yankee Stadium": 1.09,
+    "Oracle Park": 0.91,
+    "Petco Park": 0.94,
+    "Truist Park": 1.01,
+    "Globe Life Field": 1.06,
+    "Chase Field": 1.05,
+    "T-Mobile Park": 0.96,
+    "Guaranteed Rate Field": 1.02,
+    "loanDepot park": 0.97,
+    "Great American Ball Park": 1.08,
+    "PNC Park": 0.98,
+    "Minute Maid Park": 1.03,
+    "Dodger Stadium": 0.96,
+    "Angel Stadium": 0.99,
+    "Fenway Park": 1.04,
+    "Wrigley Field": 1.00,
+    "Busch Stadium": 0.97,
+    "Citizens Bank Park": 1.01,
+}
+
+# ===========================================================================
+# Probability tables
+# ===========================================================================
+
+# Base hit probability given a ball is put in play, by contact type
+HIT_PROB_BY_CONTACT: dict[str, float] = {
+    "ground_ball": 0.238,
+    "fly_ball": 0.185,
+    "line_drive": 0.685,
+    "popup": 0.020,
+}
+
+# Extra-base-hit probability given a hit occurred, keyed by contact type then base
+XBH_PROB_BY_CONTACT: dict[str, dict[str, float]] = {
+    "ground_ball": {"2B": 0.05, "3B": 0.01, "HR": 0.00},
+    "fly_ball":    {"2B": 0.08, "3B": 0.01, "HR": 0.20},
+    "line_drive":  {"2B": 0.30, "3B": 0.03, "HR": 0.05},
+    "popup":       {"2B": 0.00, "3B": 0.00, "HR": 0.00},
+}
+
+# Sacrifice-fly probability for a fly-ball out with runner on 3B (< 2 outs)
+SAC_FLY_PROB: float = 0.10
+
+# Wild-pitch / passed-ball probability per pitch
+WILD_PITCH_PROB: float = 0.003
+
+# Stolen-base attempt rate per opportunity (runner on 1B or 2B)
+SB_ATTEMPT_RATE: float = 0.10
+
+# Stolen-base success probability (conditional on attempt)
+SB_SUCCESS_PROB: float = 0.79
+
+# ===========================================================================
+# Pitcher fatigue / stamina model
+# ===========================================================================
+
+# Pitch count at which a starter's performance begins to degrade
+STAMINA_THRESHOLD: int = 90
+
+# Rate of K-rate decline per pitch above the threshold
+FATIGUE_K_DECLINE_PER_PITCH: float = 0.002
+
+# Rate of BB-rate increase per pitch above the threshold
+FATIGUE_BB_INCREASE_PER_PITCH: float = 0.001
+
+# Maximum pitch count before an automatic pull
+MAX_PITCH_COUNT: int = 120
+
+# ===========================================================================
+# Bullpen / relief model
+# ===========================================================================
+
+# Flat K% boost for relievers vs starters (relievers throw harder)
+BULLPEN_K_BOOST: float = 0.025
+
+# Flat BB% for relievers (slightly higher due to higher stuff, wilder)
+BULLPEN_BB_ADJ: float = 0.005
+
+# HR/FB rate for relievers
+BULLPEN_HR_PER_FB: float = 0.150
+
+# ===========================================================================
+# Confidence / scoring weights
+# ===========================================================================
+
+# Minimum sample size (PA) to trust a player's rate stats
+MIN_SAMPLE_PA: int = 100
+
+# Weight of recent (14-day) form vs career stats
+RECENT_FORM_WEIGHT: float = 0.30
+CAREER_WEIGHT: float = 0.70
+
+# Maximum confidence score achievable
+MAX_CONFIDENCE: float = 0.95
+
+# Minimum confidence score (floor)
+MIN_CONFIDENCE: float = 0.40
+
+# ===========================================================================
+# Structured config dataclass (optional convenience wrapper)
 # ===========================================================================
 
 
 @dataclass
-class SimulationConfig:
-    """
-    Central knob-panel for the Monte Carlo simulator.
-
-    All numeric constants that influence simulation behaviour live here so
-    that callers can override individual fields without touching module-level
-    globals.
-
-    Example
-    -------
-    >>> cfg = SimulationConfig(NUM_SIMULATIONS=500, RANDOM_SEED=42)
-    """
-
-    # ------------------------------------------------------------------
-    # Simulation controls
-    # ------------------------------------------------------------------
-    NUM_SIMULATIONS: int = 2500
-    """Number of Monte Carlo trials per game."""
-
-    RANDOM_SEED: Optional[int] = None
-    """
-    Set to an integer for reproducible runs (testing / CI).
-    Use ``None`` in production for true randomness.
-    """
-
-    # ------------------------------------------------------------------
-    # Model artefact paths
-    # ------------------------------------------------------------------
-    MODEL_PATH: str = "models/matchup_model.joblib"
-    """Path to the serialised matchup classifier."""
-
-    SCALER_PATH: str = "models/feature_scaler.joblib"
-    """Path to the fitted feature scaler."""
-
-    # ------------------------------------------------------------------
-    # Sample-size / regression parameters
-    # ------------------------------------------------------------------
-    MIN_PA_THRESHOLD: int = 50
-    """Minimum plate appearances required before trusting individual stats."""
-
-    REGRESSION_PA: int = 200
-    """
-    Effective PA used to weight individual stats against the league average
-    during Bayesian / shrinkage regression for small samples.
-
-    player_rate = (player_pa * player_rate + REGRESSION_PA * lg_avg) /
-                  (player_pa + REGRESSION_PA)
-    """
-
-    # ------------------------------------------------------------------
-    # Recent-form vs. career weighting
-    # ------------------------------------------------------------------
-    RECENT_DAYS: int = 14
-    """Look-back window (calendar days) for the recent-form slice."""
-
-    CAREER_DAYS: int = 365
-    """Look-back window (calendar days) for the career-stats slice."""
-
-    RECENT_WEIGHT: float = 0.6
-    """Weight applied to recent-form rates when blending with career rates."""
-
-    CAREER_WEIGHT: float = 0.4
-    """Weight applied to career rates when blending with recent-form rates."""
-
-    def __post_init__(self) -> None:
-        if abs(self.RECENT_WEIGHT + self.CAREER_WEIGHT - 1.0) > 1e-9:
-            raise ValueError(
-                f"RECENT_WEIGHT + CAREER_WEIGHT must equal 1.0, "
-                f"got {self.RECENT_WEIGHT + self.CAREER_WEIGHT}"
-            )
-        if self.NUM_SIMULATIONS < 1:
-            raise ValueError("NUM_SIMULATIONS must be a positive integer.")
-
-    # ------------------------------------------------------------------
-    # Pitcher workload model
-    # ------------------------------------------------------------------
-    PITCH_COUNT_MEAN: int = 92
-    """Expected starter pitch count (league average, 2024)."""
-
-    PITCH_COUNT_STD: int = 12
-    """Standard deviation of starter pitch counts."""
-
-    PITCHES_PER_PA: float = 3.95
-    """League-average pitches per plate appearance — used to estimate IP."""
-
-    # ------------------------------------------------------------------
-    # Betting / edge parameters
-    # ------------------------------------------------------------------
-    EV_THRESHOLD: float = 0.03
-    """Minimum positive expected value (edge) required to flag a bet."""
-
-    KELLY_FRACTION: float = 0.25
-    """Fractional Kelly multiplier (quarter-Kelly by default)."""
-
-    MAX_KELLY_BET: float = 0.05
-    """Hard cap on any single wager as a fraction of bankroll (5 %)."""
-
-
-# ===========================================================================
-# 2. PA_OUTCOMES — exhaustive list of individual plate-appearance outcomes
-# ===========================================================================
-
-
-class PAOutcome(str, Enum):
-    """Enumeration of every possible plate-appearance result tracked in the sim."""
-
-    STRIKEOUT = "strikeout"
-    WALK = "walk"
-    HBP = "hbp"
-    SINGLE = "single"
-    DOUBLE = "double"
-    TRIPLE = "triple"
-    HOME_RUN = "home_run"
-    FIELD_OUT = "field_out"
-    GROUND_OUT = "ground_out"
-    FLY_OUT = "fly_out"
-    LINE_OUT = "line_out"
-    POP_OUT = "pop_out"
-    DOUBLE_PLAY = "double_play"
-    SAC_FLY = "sac_fly"
-    SAC_BUNT = "sac_bunt"
-    FIELDERS_CHOICE = "fielders_choice"
-
-
-# Flat list alias for code that iterates over outcome strings directly.
-PA_OUTCOMES: List[str] = [o.value for o in PAOutcome]
-
-
-# ===========================================================================
-# 3. Outcome groups — model output layer
-# ===========================================================================
-
-
-OUTCOME_GROUPS: Dict[str, List[str]] = {
-    "strikeout": ["strikeout", "strikeout_double_play"],
-    "walk": ["walk"],
-    "hbp": ["hit_by_pitch"],
-    "single": ["single"],
-    "double": ["double"],
-    "triple": ["triple"],
-    "home_run": ["home_run"],
-    "out": [
-        "field_out",
-        "grounded_into_double_play",
-        "force_out",
-        "sac_fly",
-        "sac_bunt",
-        "fielders_choice",
-        "double_play",
-        "sac_fly_double_play",
-        "triple_play",
-    ],
-}
-"""
-Mapping from the model's output class labels to the raw Statcast event strings
-they subsume.  Used to collapse fine-grained event codes into the probability
-vector the classifier actually predicts.
-"""
-
-MODEL_OUTCOMES: List[str] = [
-    "strikeout",
-    "walk",
-    "hbp",
-    "single",
-    "double",
-    "triple",
-    "home_run",
-    "out",
-]
-"""Ordered list of class labels produced by the matchup model."""
-
-
-# ===========================================================================
-# 4. League-average outcome rates (2024 season regression targets)
-# ===========================================================================
-
-
-LEAGUE_AVG_RATES: Dict[str, float] = {
-    "strikeout": 0.224,
-    "walk": 0.082,
-    "hbp": 0.012,
-    "single": 0.145,
-    "double": 0.044,
-    "triple": 0.004,
-    "home_run": 0.032,
-    "out": 0.457,
-}
-"""
-2024 MLB league-average plate-appearance outcome rates.
-
-Used as the regression (shrinkage) target for small-sample batter / pitcher
-rate estimates.  Rates must sum to 1.0; any residual is absorbed by ``out``.
-"""
-
-_lg_sum = sum(LEAGUE_AVG_RATES.values())
-assert abs(_lg_sum - 1.0) < 1e-6, (
-    f"LEAGUE_AVG_RATES do not sum to 1.0 (got {_lg_sum:.6f}). "
-    "Adjust the 'out' bucket to compensate."
-)
-
-
-# ===========================================================================
-# 5. Park factors — all 30 MLB venues
-# ===========================================================================
-#
-# Keys: venue name string (matches the 'venue_name' column in Statcast data)
-# Sub-keys:
-#   hr  — home-run park factor   (1.00 = neutral)
-#   h   — hits / BABIP factor
-#   k   — strikeout factor
-#   bb  — walk factor
-#   2b  — doubles factor
-#   3b  — triples factor
-#
-# Sources: ESPN Park Factors, Baseball Reference 5-year multi-season averages,
-# FanGraphs Park Factors (2019-2024 composite).  Values are normalised so that
-# 1.00 = perfectly neutral.
-# ===========================================================================
-
-
-PARK_FACTORS: Dict[str, Dict[str, float]] = {
-    # National League
-    "Truist Park": {
-        "hr": 1.05, "h": 1.02, "k": 0.99, "bb": 1.00, "2b": 1.04, "3b": 0.80,
-    },
-    "Wrigley Field": {
-        "hr": 1.08, "h": 1.03, "k": 0.97, "bb": 1.01, "2b": 1.05, "3b": 0.85,
-    },
-    "Great American Ball Park": {
-        "hr": 1.18, "h": 1.04, "k": 0.96, "bb": 1.02, "2b": 1.06, "3b": 0.78,
-    },
-    "Coors Field": {
-        "hr": 1.30, "h": 1.18, "k": 0.88, "bb": 1.05, "2b": 1.22, "3b": 1.55,
-    },
-    "Chase Field": {
-        "hr": 1.10, "h": 1.03, "k": 0.98, "bb": 1.01, "2b": 1.04, "3b": 0.90,
-    },
-    "Dodger Stadium": {
-        "hr": 0.95, "h": 0.97, "k": 1.02, "bb": 0.99, "2b": 0.96, "3b": 0.88,
-    },
-    "Petco Park": {
-        "hr": 0.85, "h": 0.95, "k": 1.03, "bb": 0.98, "2b": 0.94, "3b": 0.90,
-    },
-    "Oracle Park": {
-        "hr": 0.78, "h": 0.96, "k": 1.04, "bb": 0.99, "2b": 1.00, "3b": 1.10,
-    },
-    "loanDepot park": {
-        "hr": 0.92, "h": 0.98, "k": 1.01, "bb": 0.99, "2b": 0.95, "3b": 0.85,
-    },
-    "American Family Field": {
-        "hr": 1.12, "h": 1.02, "k": 0.98, "bb": 1.00, "2b": 1.03, "3b": 0.80,
-    },
-    "Citi Field": {
-        "hr": 0.90, "h": 0.97, "k": 1.02, "bb": 1.00, "2b": 0.98, "3b": 0.85,
-    },
-    "Citizens Bank Park": {
-        "hr": 1.15, "h": 1.04, "k": 0.97, "bb": 1.01, "2b": 1.05, "3b": 0.82,
-    },
-    "PNC Park": {
-        "hr": 0.95, "h": 0.99, "k": 1.00, "bb": 0.99, "2b": 1.02, "3b": 1.05,
-    },
-    "Busch Stadium": {
-        "hr": 0.96, "h": 0.99, "k": 1.01, "bb": 0.99, "2b": 1.00, "3b": 0.92,
-    },
-    "Petco Park": {  # type: ignore[misc]  # duplicate key guard — kept for alias safety
-        "hr": 0.85, "h": 0.95, "k": 1.03, "bb": 0.98, "2b": 0.94, "3b": 0.90,
-    },
-    # American League
-    "Oriole Park at Camden Yards": {
-        "hr": 1.14, "h": 1.03, "k": 0.98, "bb": 1.00, "2b": 1.04, "3b": 0.78,
-    },
-    "Fenway Park": {
-        "hr": 1.08, "h": 1.07, "k": 0.97, "bb": 1.01, "2b": 1.18, "3b": 0.82,
-    },
-    "Guaranteed Rate Field": {
-        "hr": 1.10, "h": 1.01, "k": 0.99, "bb": 1.00, "2b": 1.02, "3b": 0.80,
-    },
-    "Progressive Field": {
-        "hr": 0.97, "h": 1.00, "k": 1.00, "bb": 1.00, "2b": 1.03, "3b": 0.85,
-    },
-    "Comerica Park": {
-        "hr": 0.88, "h": 0.98, "k": 1.02, "bb": 1.00, "2b": 1.00, "3b": 0.90,
-    },
-    "Kauffman Stadium": {
-        "hr": 0.93, "h": 1.00, "k": 1.00, "bb": 0.99, "2b": 1.01, "3b": 1.00,
-    },
-    "Target Field": {
-        "hr": 1.00, "h": 1.00, "k": 1.00, "bb": 1.00, "2b": 1.02, "3b": 0.88,
-    },
-    "Yankee Stadium": {
-        "hr": 1.22, "h": 1.02, "k": 0.98, "bb": 1.01, "2b": 1.00, "3b": 0.72,
-    },
-    "Oakland Coliseum": {
-        "hr": 0.80, "h": 0.94, "k": 1.04, "bb": 0.98, "2b": 0.92, "3b": 0.88,
-    },
-    "T-Mobile Park": {
-        "hr": 0.90, "h": 0.97, "k": 1.02, "bb": 1.00, "2b": 0.97, "3b": 0.90,
-    },
-    "Tropicana Field": {
-        "hr": 0.94, "h": 0.98, "k": 1.01, "bb": 0.99, "2b": 0.96, "3b": 0.85,
-    },
-    "Globe Life Field": {
-        "hr": 1.05, "h": 1.01, "k": 0.99, "bb": 1.00, "2b": 1.02, "3b": 0.82,
-    },
-    "Rogers Centre": {
-        "hr": 1.15, "h": 1.03, "k": 0.97, "bb": 1.01, "2b": 1.04, "3b": 0.78,
-    },
-    # Houston (NL-origin, now AL)
-    "Minute Maid Park": {
-        "hr": 1.10, "h": 1.02, "k": 0.98, "bb": 1.00, "2b": 1.05, "3b": 0.80,
-    },
-    # Inter-league / neutral (fallback)
-    "neutral": {
-        "hr": 1.00, "h": 1.00, "k": 1.00, "bb": 1.00, "2b": 1.00, "3b": 1.00,
-    },
-}
-"""
-Per-outcome park factors for all 30 MLB venues plus a ``neutral`` fallback.
-
-Look up with ``PARK_FACTORS.get(venue_name, PARK_FACTORS["neutral"])``.
-"""
-
-
-# ===========================================================================
-# 6. Feature columns — exact ordered input vector for the matchup model
-# ===========================================================================
-
-
-FEATURE_COLUMNS: List[str] = [
-    # --- Pitcher features ---
-    "pitcher_k_rate",
-    "pitcher_bb_rate",
-    "pitcher_hr_rate",
-    "pitcher_whiff_pct",
-    "pitcher_csw_pct",
-    "pitcher_zone_pct",
-    "pitcher_swstr_pct",
-    "pitcher_avg_velo",
-    "pitcher_chase_rate",
-    "pitcher_iz_contact_pct",
-    # --- Batter features ---
-    "batter_k_rate",
-    "batter_bb_rate",
-    "batter_hr_rate",
-    "batter_xba",
-    "batter_xslg",
-    "batter_barrel_pct",
-    "batter_hard_hit_pct",
-    "batter_chase_rate",
-    "batter_whiff_pct",
-    "batter_contact_pct",
-    # --- Matchup context ---
-    "platoon_advantage",
-    "is_home",
-    "park_hr_factor",
-    "park_k_factor",
-    "park_h_factor",
-    # --- Game-day context ---
-    "umpire_k_factor",
-    "catcher_framing_score",
-    # --- Recent form / market ---
-    "pitcher_recent_k_rate",
-    "batter_recent_ba",
-    "game_total_line",
-    # --- Weather ---
-    "temp_f",
-    "wind_speed_mph",
-    "wind_out",
-]
-"""
-Ordered list of feature columns fed to the matchup model.
-
-**Order matters** — the scaler and model were fit on this exact column order.
-Do not reorder or add/remove columns without retraining.
-"""
-
-
-# ===========================================================================
-# 7. Supabase configuration (secrets via environment / .env)
-# ===========================================================================
-
-
-SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
-"""
-Supabase project URL.  Set via the ``SUPABASE_URL`` environment variable or
-a ``.env`` file in the project root.
-"""
-
-SUPABASE_KEY: str = os.environ.get("SUPABASE_KEY", "")
-"""
-Supabase ``anon`` (public) or ``service_role`` key.  Set via ``SUPABASE_KEY``
-environment variable or a ``.env`` file.  **Never hard-code this value.**
-"""
-
-
-# ===========================================================================
-# 8. Logging configuration
-# ===========================================================================
-
-
-def configure_logging(
-    level: int = logging.INFO,
-    log_file: Optional[str] = None,
-    fmt: str = "%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
-    datefmt: str = "%Y-%m-%d %H:%M:%S",
-) -> logging.Logger:
-    """
-    Configure the root logger and return the ``baselinemlb`` application logger.
-
-    Parameters
-    ----------
-    level:
-        Logging level for both console and file handlers.
-        Defaults to ``logging.INFO``.
-    log_file:
-        Optional path to a rotating log file.  When *None* (default) only a
-        ``StreamHandler`` pointing to *stdout* is attached.
-    fmt:
-        Log record format string.
-    datefmt:
-        Date format for the log record timestamp.
-
-    Returns
-    -------
-    logging.Logger
-        The ``baselinemlb`` named logger, ready to use.
-
-    Example
-    -------
-    >>> logger = configure_logging(level=logging.DEBUG, log_file="sim.log")
-    >>> logger.info("Simulator starting up")
-    """
-    formatter = logging.Formatter(fmt=fmt, datefmt=datefmt)
-
-    # Console handler → stdout so Docker / systemd capture it cleanly.
-    console_handler = logging.StreamHandler(stream=sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(level)
-
-    handlers: List[logging.Handler] = [console_handler]
-
-    if log_file:
-        from logging.handlers import RotatingFileHandler
-
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=10 * 1024 * 1024,  # 10 MB per file
-            backupCount=5,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(level)
-        handlers.append(file_handler)
-
-    # Configure the root logger once; subsequent calls are idempotent.
-    root = logging.getLogger()
-    if not root.handlers:
-        root.setLevel(level)
-        for h in handlers:
-            root.addHandler(h)
-    else:
-        # If root is already configured, update its level silently.
-        root.setLevel(min(root.level, level))
-
-    return logging.getLogger("baselinemlb")
-
-
-# ---------------------------------------------------------------------------
-# Module-level default logger (INFO, console only).
-# Callers that need file logging or DEBUG output should call
-# configure_logging() themselves before importing other simulator modules.
-# ---------------------------------------------------------------------------
-logger: logging.Logger = configure_logging()
-
-
-# ===========================================================================
-# Convenience: module-level default config instance
-# ===========================================================================
-
-DEFAULT_CONFIG: SimulationConfig = SimulationConfig()
-"""
-A ready-to-use ``SimulationConfig`` with production defaults.
-
-Import and use directly::
-
-    from simulation.config import DEFAULT_CONFIG
-    n = DEFAULT_CONFIG.NUM_SIMULATIONS  # 2500
-"""
+class SimConfig:
+    """Convenience dataclass wrapping the top-level constants."""
+
+    n_sims: int = DEFAULT_N_SIMS
+    seed: Optional[int] = DEFAULT_SEED
+    innings: int = INNINGS_PER_GAME
+    max_extra_innings: int = MAX_EXTRA_INNINGS
+    park_k_factors: dict[str, int] = field(default_factory=lambda: dict(PARK_K_FACTORS))
+    park_run_factors: dict[str, float] = field(default_factory=lambda: dict(PARK_RUN_FACTORS))
+    stamina_threshold: int = STAMINA_THRESHOLD
+    max_pitch_count: int = MAX_PITCH_COUNT
+    fatigue_k_decline: float = FATIGUE_K_DECLINE_PER_PITCH
+    fatigue_bb_increase: float = FATIGUE_BB_INCREASE_PER_PITCH
+    bullpen_k_boost: float = BULLPEN_K_BOOST
+    bullpen_bb_adj: float = BULLPEN_BB_ADJ
+    recent_form_weight: float = RECENT_FORM_WEIGHT
+    career_weight: float = CAREER_WEIGHT
+    min_sample_pa: int = MIN_SAMPLE_PA
+
+    def park_k_factor(self, venue: str) -> int:
+        """Return the K-factor for *venue*, defaulting to 0."""
+        return self.park_k_factors.get(venue, 0)
+
+    def park_run_factor(self, venue: str) -> float:
+        """Return the run-factor for *venue*, defaulting to 1.0."""
+        return self.park_run_factors.get(venue, 1.0)

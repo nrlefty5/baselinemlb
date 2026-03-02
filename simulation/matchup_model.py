@@ -1,1013 +1,595 @@
 """
 BaselineMLB — matchup_model.py
-================================
-Core ML model that predicts per-PA outcome probabilities for each
-batter-pitcher matchup.
+=================================================
+Pure-Python matchup simulation model.
 
-Three classes are exposed:
-
-  TrainedMatchupModel  — LightGBM multi-class classifier (8 outcomes).
-                         Falls back to OddsRatioModel when no saved model
-                         is available.
-
-  OddsRatioModel       — Generalised log5 / odds-ratio formula with full
-                         contextual adjustments (park, platoon, umpire,
-                         catcher framing, weather). No training data required.
-
-  MatchupModel         — Unified façade that tries the trained model first
-                         and degrades gracefully to OddsRatioModel.  Also
-                         exposes the glass-box explain_prediction() method
-                         that is BaselineMLB's key differentiator.
-
-All predict_pa_probs() methods return a dict[str, float] whose values sum
-to exactly 1.0, keyed by the 8 strings in MODEL_OUTCOMES.
+This module is deliberately kept free of any heavy ML
+dependencies so the CI/testing layer stays lean.
+The full stochastic simulation lives in game_engine.py;
+this file focuses on *player-vs-player* probability
+computations used to drive pitch-outcome sampling.
 """
 
 from __future__ import annotations
 
-import logging
-import os
-import warnings
-from pathlib import Path
+import math
+import random
+from dataclasses import dataclass, field
 from typing import Optional
 
-import numpy as np
-
 # ---------------------------------------------------------------------------
-# Imports from simulation.config — only the three names the task specifies
+# Constants
 # ---------------------------------------------------------------------------
-from simulation.config import (
-    FEATURE_COLUMNS,
-    LEAGUE_AVG_RATES,
-    MODEL_OUTCOMES,
-)
 
-# LightGBM is optional — gracefully skip if not installed
-try:
-    import lightgbm as lgb  # type: ignore
-    _LGBM_AVAILABLE = True
-except ImportError:
-    lgb = None  # type: ignore
-    _LGBM_AVAILABLE = False
+# League-average rates (2024 season)
+MLB_AVG_BA = 0.243
+MLB_AVG_OBP = 0.315
+MLB_AVG_SLG = 0.392
+MLB_AVG_K_PCT = 0.224
+MLB_AVG_BB_PCT = 0.085
+MLB_AVG_HR_PER_FB = 0.138
+MLB_AVG_FB_PCT = 0.360
+MLB_AVG_GB_PCT = 0.440
+MLB_AVG_LD_PCT = 0.200
 
-log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Derived module-level constants (not imported from config — computed here)
-# ---------------------------------------------------------------------------
-NUM_OUTCOMES: int = len(MODEL_OUTCOMES)
-OUTCOME_TO_IDX: dict[str, int] = {o: i for i, o in enumerate(MODEL_OUTCOMES)}
-
-# Per-outcome regression PA counts (how many PA to blend toward league avg)
-# Higher = more conservative / more shrinkage for rare events
-_REGRESSION_PA: dict[str, int] = {
-    "strikeout": 200,
-    "walk":      200,
-    "hbp":       500,   # very rare; regress harder
-    "single":    150,
-    "double":    300,
-    "triple":    600,   # extremely rare; heavy regression
-    "home_run":  300,
-    "out":       100,
+# Hit probability by contact type
+HIT_PROB = {
+    "ground_ball": 0.238,
+    "fly_ball": 0.185,
+    "line_drive": 0.685,
+    "popup": 0.020,
 }
 
-# Probability clipping bounds — applied before every normalisation
-_PROB_MIN: float = 0.001
-_PROB_MAX: float = 0.999
+# Extra-base hit probability given a hit (by type)
+XBH_PROB = {
+    "ground_ball": {"2B": 0.05, "3B": 0.01, "HR": 0.00},
+    "fly_ball": {"2B": 0.08, "3B": 0.01, "HR": 0.20},
+    "line_drive": {"2B": 0.30, "3B": 0.03, "HR": 0.05},
+    "popup": {"2B": 0.00, "3B": 0.00, "HR": 0.00},
+}
 
-# Platoon multipliers
-_PLATOON_HIT_BOOST: float  = 0.05   # 5% hit-prob boost for batter with platoon adv.
-_PLATOON_K_REDUCTION: float = 0.03  # 3% K reduction for batter with platoon adv.
-
-# Weather HR adjustment parameters
-_WEATHER_TEMP_BASELINE: float      = 72.0   # °F neutral temperature
-_WEATHER_TEMP_COEFFICIENT: float   = 0.003  # HR prob boost per °F above baseline
-_WEATHER_WIND_OUT_BOOST: float     = 0.08   # max HR boost when wind blowing out
-_WEATHER_WIND_IN_REDUCTION: float  = 0.06   # max HR reduction when blowing in
-
-# Catcher framing: K prob boost per standard deviation of framing z-score
-_FRAMING_K_PER_SD: float = 0.025
-
-# Confidence score sample thresholds
-_PA_FULL: int    = 502  # "full" data — log5 reliable
-_PA_PARTIAL: int = 150  # "some" data
-_PA_MINIMAL: int = 30   # "little" data — very uncertain
-
-# Pre-computed league-rate array (fixed order matching MODEL_OUTCOMES)
-_LEAGUE_RATES_ARRAY: np.ndarray = np.array(
-    [LEAGUE_AVG_RATES[o] for o in MODEL_OUTCOMES], dtype=np.float64
-)
-
-# Outcome index shortcuts
-_K_IDX:  int = OUTCOME_TO_IDX["strikeout"]
-_BB_IDX: int = OUTCOME_TO_IDX["walk"]
-_1B_IDX: int = OUTCOME_TO_IDX["single"]
-_2B_IDX: int = OUTCOME_TO_IDX["double"]
-_3B_IDX: int = OUTCOME_TO_IDX["triple"]
-_HR_IDX: int = OUTCOME_TO_IDX["home_run"]
-_HIT_INDICES: tuple[int, ...] = (_1B_IDX, _2B_IDX, _3B_IDX, _HR_IDX)
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 
-# ===========================================================================
-#  Utility helpers
-# ===========================================================================
+@dataclass
+class PitcherProfile:
+    """Statistical profile for a pitcher."""
 
-def _softmax(x: np.ndarray) -> np.ndarray:
-    """Numerically stable softmax over a 1-D array."""
-    x = x - x.max()
-    e = np.exp(x)
-    return e / e.sum()
+    mlbam_id: int
+    name: str
+    # Rate stats
+    k_pct: float = MLB_AVG_K_PCT
+    bb_pct: float = MLB_AVG_BB_PCT
+    hr_per_fb: float = MLB_AVG_HR_PER_FB
+    # Batted ball mix
+    fb_pct: float = MLB_AVG_FB_PCT
+    gb_pct: float = MLB_AVG_GB_PCT
+    ld_pct: float = MLB_AVG_LD_PCT
+    # Pitch mix (proportion of each pitch type)
+    pitch_mix: dict = field(default_factory=lambda: {
+        "FF": 0.40, "SI": 0.15, "SL": 0.20,
+        "CH": 0.12, "CU": 0.10, "FC": 0.03,
+    })
+    # Stuff+ / Location+ (100 = average)
+    stuff_plus: float = 100.0
+    location_plus: float = 100.0
+    # Handedness
+    throws: str = "R"  # "R" or "L"
+
+    def popup_pct(self) -> float:
+        return max(0.0, 1.0 - self.fb_pct - self.gb_pct - self.ld_pct)
 
 
-def _clip_and_normalise(probs: np.ndarray) -> np.ndarray:
+@dataclass
+class BatterProfile:
+    """Statistical profile for a batter."""
+
+    mlbam_id: int
+    name: str
+    # Rate stats
+    k_pct: float = MLB_AVG_K_PCT
+    bb_pct: float = MLB_AVG_BB_PCT
+    ba: float = MLB_AVG_BA
+    obp: float = MLB_AVG_OBP
+    slg: float = MLB_AVG_SLG
+    # Batted ball tendencies
+    fb_pct: float = MLB_AVG_FB_PCT
+    gb_pct: float = MLB_AVG_GB_PCT
+    ld_pct: float = MLB_AVG_LD_PCT
+    # Pull/oppo tendencies
+    pull_pct: float = 0.40
+    oppo_pct: float = 0.25
+    # Platoon split (additional OBP vs same-handed pitcher)
+    platoon_obp_adj: float = 0.000
+    # Handedness
+    bats: str = "R"  # "R", "L", or "S" (switch)
+    # Sprint speed (ft/s) for baserunning
+    sprint_speed: float = 27.0
+
+    def popup_pct(self) -> float:
+        return max(0.0, 1.0 - self.fb_pct - self.gb_pct - self.ld_pct)
+
+
+@dataclass
+class MatchupResult:
+    """Result of a single plate appearance simulation."""
+
+    outcome: str  # "K", "BB", "HBP", "1B", "2B", "3B", "HR", "out"
+    contact_type: Optional[str] = None  # "ground_ball", "fly_ball", "line_drive", "popup"
+    is_hard_hit: bool = False
+    pitch_count: int = 0
+    details: dict = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Log5 / odds-ratio blending
+# ---------------------------------------------------------------------------
+
+
+def log5_rate(p_batter: float, p_pitcher: float, p_league: float) -> float:
     """
-    Clip every probability to [_PROB_MIN, _PROB_MAX] then re-normalise so
-    the result sums to exactly 1.0.
+    Bill James Log5 formula for matchup probability.
+
+    Combines batter rate, pitcher rate, and league average
+    to produce a matchup-specific probability.
+
+    Args:
+        p_batter:  Batter's rate for the event (e.g. K%)
+        p_pitcher: Pitcher's rate for the event
+        p_league:  League-average rate for the event
+
+    Returns:
+        Blended matchup probability [0, 1]
     """
-    probs = np.clip(probs, _PROB_MIN, _PROB_MAX).astype(np.float64)
-    total = probs.sum()
-    if total <= 0:
-        return np.full(len(probs), 1.0 / len(probs))
-    return probs / total
+    if p_league <= 0 or p_league >= 1:
+        return (p_batter + p_pitcher) / 2.0
+
+    # Odds form: o = p / (1 - p)
+    o_b = p_batter / (1.0 - p_batter) if p_batter < 1.0 else 1e6
+    o_p = p_pitcher / (1.0 - p_pitcher) if p_pitcher < 1.0 else 1e6
+    o_l = p_league / (1.0 - p_league)
+
+    # Log5: o_matchup = o_b * o_p / o_l
+    o_m = (o_b * o_p) / o_l
+    return o_m / (1.0 + o_m)
 
 
-def _array_to_dict(arr: np.ndarray) -> dict[str, float]:
-    """Convert a (NUM_OUTCOMES,) probability array to {outcome: prob}."""
-    return {outcome: float(arr[i]) for i, outcome in enumerate(MODEL_OUTCOMES)}
+def clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    """Clamp a probability to [lo, hi]."""
+    return max(lo, min(hi, value))
 
 
-def _regress_toward_league(
-    observed_rate: float,
-    outcome: str,
-    sample_pa: int,
-) -> float:
+# ---------------------------------------------------------------------------
+# Pitch-outcome simulator
+# ---------------------------------------------------------------------------
+
+
+def _stuff_adjustment(stuff_plus: float) -> float:
     """
-    Bayesian-style shrinkage toward the league average rate.
-
-        regressed = (observed_events + league_avg * regression_pa) /
-                    (sample_pa       + regression_pa)
-
-    where observed_events = observed_rate × sample_pa.
+    Convert Stuff+ to a K-rate multiplier.
+    Each 10 Stuff+ points ≈ 1.5 pp K-rate change.
     """
-    reg_pa    = _REGRESSION_PA.get(outcome, 200)
-    lg_avg    = LEAGUE_AVG_RATES[outcome]
-    obs_events = max(0.0, observed_rate) * max(0, sample_pa)
-    return float((obs_events + lg_avg * reg_pa) / (sample_pa + reg_pa))
+    return 1.0 + (stuff_plus - 100.0) * 0.0015
 
 
-def _confidence_from_sample(pitcher_pa: int, batter_pa: int) -> float:
+def _location_adjustment(location_plus: float) -> float:
     """
-    Return a [0, 1] confidence score reflecting data availability.
-    Uses a harmonic-mean blend of pitcher and batter sample quality.
+    Convert Location+ to a BB-rate multiplier (inverse).
+    Each 10 Location+ points ≈ 1 pp BB-rate improvement.
     """
-    def _score(n: int) -> float:
-        if n >= _PA_FULL:
-            return 1.0
-        if n >= _PA_PARTIAL:
-            return 0.6 + 0.4 * (n - _PA_PARTIAL) / (_PA_FULL - _PA_PARTIAL)
-        if n >= _PA_MINIMAL:
-            return 0.2 + 0.4 * (n - _PA_MINIMAL) / (_PA_PARTIAL - _PA_MINIMAL)
-        return 0.1 * n / max(_PA_MINIMAL, 1)
-
-    ps = _score(pitcher_pa)
-    bs = _score(batter_pa)
-    if ps + bs == 0.0:
-        return 0.0
-    return 2.0 * ps * bs / (ps + bs)
+    return 1.0 - (location_plus - 100.0) * 0.0010
 
 
-# ===========================================================================
-#  Approach 1 — Trained ML Model (LightGBM multi-class classifier)
-# ===========================================================================
-
-class TrainedMatchupModel:
+def simulate_plate_appearance(
+    pitcher: PitcherProfile,
+    batter: BatterProfile,
+    *,
+    rng: Optional[random.Random] = None,
+    count_factor: float = 1.0,
+) -> MatchupResult:
     """
-    LightGBM multi-class classifier with 8 PA outcome classes.
+    Simulate a single plate appearance between *pitcher* and *batter*.
 
-    objective='multiclass', num_class=8.  The model is expected to accept
-    a feature vector ordered exactly as ``FEATURE_COLUMNS`` from
-    ``simulation.config``.
+    Uses Log5 blending to compute matchup-specific outcome probabilities,
+    then samples a result from those probabilities.
 
-    Parameters
-    ----------
-    model_path : str | Path | None
-        Path to a saved LightGBM booster (.txt native format or .pkl/.pickle).
-        If *None* or the file does not exist, ``is_loaded`` will be ``False``
-        and callers should use ``OddsRatioModel`` instead.
+    Args:
+        pitcher:      Pitcher's statistical profile.
+        batter:       Batter's statistical profile.
+        rng:          Optional seeded random.Random instance.
+        count_factor: Multiplier for count-based adjustments (1.0 = neutral count).
+
+    Returns:
+        A MatchupResult with the outcome and metadata.
     """
+    rng = rng or random
 
-    def __init__(self, model_path: Optional[str | Path] = None) -> None:
-        self.model_path    = Path(model_path) if model_path else None
-        self.is_loaded: bool = False
-        self._model: Optional["lgb.Booster"] = None
-        self._feature_names: list[str] = list(FEATURE_COLUMNS)
+    # --- Step 1: Compute matchup K%, BB%, HBP% via Log5 ---
+    k_pct = clamp(
+        log5_rate(batter.k_pct, pitcher.k_pct, MLB_AVG_K_PCT)
+        * _stuff_adjustment(pitcher.stuff_plus)
+        * count_factor
+    )
+    bb_pct = clamp(
+        log5_rate(batter.bb_pct, pitcher.bb_pct, MLB_AVG_BB_PCT)
+        * _location_adjustment(pitcher.location_plus)
+    )
+    hbp_pct = 0.009  # flat MLB average
 
-        if not _LGBM_AVAILABLE:
-            log.warning(
-                "lightgbm is not installed.  TrainedMatchupModel will not "
-                "function; use MatchupModel which falls back automatically."
-            )
-            return
+    # Platoon adjustment on BB
+    same_hand = (
+        (pitcher.throws == "R" and batter.bats == "R")
+        or (pitcher.throws == "L" and batter.bats == "L")
+    )
+    if same_hand:
+        bb_pct = clamp(bb_pct + batter.platoon_obp_adj * 0.5)
+        k_pct = clamp(k_pct + batter.platoon_obp_adj * 0.3)
 
-        if self.model_path is not None and self.model_path.is_file():
-            self._load(self.model_path)
-        elif self.model_path is not None:
-            log.warning(
-                "Model file not found at '%s'.  Falling back to "
-                "OddsRatioModel.", self.model_path
-            )
+    # --- Step 2: Resolve terminal outcome ---
+    roll = rng.random()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    if roll < k_pct:
+        return MatchupResult(outcome="K", pitch_count=_sample_pitch_count(rng, "K"))
 
-    def predict_pa_probs(self, features: np.ndarray) -> dict[str, float]:
-        """
-        Predict PA outcome probabilities from a pre-built feature vector.
+    roll -= k_pct
+    if roll < bb_pct:
+        return MatchupResult(outcome="BB", pitch_count=_sample_pitch_count(rng, "BB"))
 
-        Parameters
-        ----------
-        features : np.ndarray
-            1-D array of length ``len(FEATURE_COLUMNS)`` in the same order
-            as ``FEATURE_COLUMNS``.  May also be 2-D with shape (1, n_features).
+    roll -= bb_pct
+    if roll < hbp_pct:
+        return MatchupResult(outcome="HBP", pitch_count=_sample_pitch_count(rng, "HBP"))
 
-        Returns
-        -------
-        dict[str, float]
-            Probabilities for each outcome in ``MODEL_OUTCOMES``, guaranteed
-            to sum to exactly 1.0.
+    # --- Step 3: Ball in play ---
+    contact_type = _sample_contact_type(pitcher, batter, rng)
+    is_hard_hit = rng.random() < 0.38  # ~38% hard-hit rate on BIP
 
-        Raises
-        ------
-        RuntimeError
-            If the model is not loaded (``is_loaded == False``).
-        """
-        if not self.is_loaded or self._model is None:
-            raise RuntimeError(
-                "TrainedMatchupModel has no loaded model.  "
-                "Use MatchupModel which handles fallback automatically."
-            )
+    hit_prob = HIT_PROB[contact_type]
+    if is_hard_hit:
+        hit_prob = min(hit_prob * 1.35, 0.95)  # hard contact boost
 
-        features = np.asarray(features, dtype=np.float64)
-        if features.ndim == 1:
-            features = features.reshape(1, -1)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            # LightGBM predict → shape (n_samples, n_classes)
-            raw: np.ndarray = self._model.predict(features)[0]  # (n_classes,)
-
-        # Softmax for a valid probability distribution, then clip + normalise
-        probs = _softmax(raw)
-        probs = _clip_and_normalise(probs)
-        return _array_to_dict(probs)
-
-    def get_feature_importance(self) -> dict[str, float]:
-        """
-        Return gain-based feature importance normalised to sum to 1.0.
-
-        Returns
-        -------
-        dict[str, float]
-            Sorted descending by importance.  Empty dict if model not loaded.
-        """
-        if not self.is_loaded or self._model is None:
-            return {}
-
-        raw: np.ndarray = self._model.feature_importance(importance_type="gain")
-        names: list[str] = self._model.feature_name()
-        total = raw.sum()
-        if total == 0:
-            return {n: 0.0 for n in names}
-
-        normalised = {n: float(v / total) for n, v in zip(names, raw)}
-        return dict(sorted(normalised.items(), key=lambda kv: kv[1], reverse=True))
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _load(self, path: Path) -> None:
-        """Load a LightGBM booster from disk (supports .txt and .pkl)."""
-        try:
-            suffix = path.suffix.lower()
-            if suffix in (".pkl", ".pickle"):
-                import pickle
-                with open(path, "rb") as fh:
-                    self._model = pickle.load(fh)
-            else:
-                # Native LightGBM text format
-                self._model = lgb.Booster(model_file=str(path))
-
-            self.is_loaded = True
-            log.info("Loaded TrainedMatchupModel from '%s'.", path)
-
-            try:
-                self._feature_names = self._model.feature_name()
-            except Exception:
-                pass  # feature names not critical
-
-        except Exception as exc:
-            log.error(
-                "Failed to load LightGBM model from '%s': %s.  "
-                "Falling back to OddsRatioModel.", path, exc,
-            )
-            self._model = None
-            self.is_loaded = False
-
-
-# ===========================================================================
-#  Approach 2 — Odds-Ratio / Generalised log5 Fallback
-# ===========================================================================
-
-class OddsRatioModel:
-    """
-    Generalised log5 / odds-ratio matchup model with contextual adjustments.
-
-    Implements the Haechrel generalisation of Bill James's log5 formula
-    across all 8 PA outcome categories, with Bayesian regression toward
-    league averages for small samples and five contextual adjustment layers:
-
-      1. Park factors  (HR, 2B, 3B, 1B)
-      2. Platoon       (batter hand vs. pitcher hand)
-      3. Umpire        (strike-zone K and BB tendencies)
-      4. Catcher framing  (called-strike K adjustment)
-      5. Weather       (temperature and wind effects on HR)
-
-    Reference
-    ---------
-    SABR — "Matchup Probabilities in Major League Baseball"
-    https://sabr.org/journal/article/matchup-probabilities-in-major-league-baseball/
-
-    PLoS ONE — "Bayesian hierarchical log5 model"
-    https://pmc.ncbi.nlm.nih.gov/articles/PMC6192592/
-    """
-
-    def __init__(self) -> None:
-        self._league_rates = dict(LEAGUE_AVG_RATES)
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def predict_pa_probs(
-        self,
-        pitcher_stats: dict,
-        batter_stats: dict,
-        context: dict,
-    ) -> dict[str, float]:
-        """
-        Predict PA outcome probabilities using the generalised log5 formula
-        with contextual adjustments.
-
-        Parameters
-        ----------
-        pitcher_stats : dict
-            Keys: ``{outcome}_rate`` for each outcome in MODEL_OUTCOMES (e.g.
-            ``'strikeout_rate'``, ``'home_run_rate'``), plus ``'sample_pa'``
-            (BF count for regression).  Missing keys fall back to
-            ``LEAGUE_AVG_RATES``.
-
-        batter_stats : dict
-            Same structure as ``pitcher_stats`` with the batter's per-PA
-            rates plus ``'sample_pa'`` and optional ``'hand'`` ('L', 'R',
-            or 'S').
-
-        context : dict
-            Contextual modifiers — all optional, sensible defaults applied:
-
-            =====================  =======  ================================
-            Key                    Default  Meaning
-            =====================  =======  ================================
-            park_hr_factor         1.0      HR park factor
-            park_2b_factor         1.0      2B park factor
-            park_3b_factor         1.0      3B park factor
-            park_1b_factor         1.0      1B park factor
-            umpire_k_factor        1.0      Umpire K rate / league avg
-            umpire_bb_factor       1.0      Umpire BB rate / league avg
-            catcher_framing_score  0.0      Framing z-score (0 = avg)
-            temperature            72.0     Game-time temp (°F)
-            wind_speed             0.0      Wind speed (mph)
-            wind_to_cf             0.0      +1 out to CF, -1 in from CF
-            pitcher_hand           'R'      Pitcher handedness
-            platoon_advantage      (auto)   Override batter/pitcher hands
-            =====================  =======  ================================
-
-        Returns
-        -------
-        dict[str, float]
-            Normalised probabilities for each outcome in ``MODEL_OUTCOMES``,
-            guaranteed to sum to exactly 1.0.  Each value is clipped to
-            [0.001, 0.999] before normalisation.
-        """
-        # ------------------------------------------------------------------
-        # Step 1 — Retrieve and regress raw rates toward the league average
-        # ------------------------------------------------------------------
-        pitcher_pa = int(pitcher_stats.get("sample_pa", _PA_PARTIAL))
-        batter_pa  = int(batter_stats.get("sample_pa", _PA_PARTIAL))
-
-        pitcher_rates = np.zeros(NUM_OUTCOMES, dtype=np.float64)
-        batter_rates  = np.zeros(NUM_OUTCOMES, dtype=np.float64)
-
-        for i, outcome in enumerate(MODEL_OUTCOMES):
-            key    = f"{outcome}_rate"
-            lg_avg = self._league_rates[outcome]
-
-            # Clip extreme raw values before regression
-            p_raw = float(np.clip(pitcher_stats.get(key, lg_avg), 0.0, 1.0))
-            b_raw = float(np.clip(batter_stats.get(key,  lg_avg), 0.0, 1.0))
-
-            pitcher_rates[i] = _regress_toward_league(p_raw, outcome, pitcher_pa)
-            batter_rates[i]  = _regress_toward_league(b_raw, outcome, batter_pa)
-
-        # ------------------------------------------------------------------
-        # Step 2 — Generalised log5 formula (Haechrel / SABR)
-        #
-        #   x'_i = (batter_rate_i / league_rate_i)
-        #           / Σ_j (batter_rate_j / league_rate_j)
-        #
-        #   P(i)  = (x'_i × pitcher_rate_i)
-        #           / Σ_j (x'_j × pitcher_rate_j)
-        # ------------------------------------------------------------------
-        safe_league  = np.where(_LEAGUE_RATES_ARRAY > 0.0, _LEAGUE_RATES_ARRAY, 1e-9)
-        batter_rel   = batter_rates / safe_league
-        b_rel_sum    = batter_rel.sum()
-        if b_rel_sum <= 0.0:
-            batter_rel = np.ones(NUM_OUTCOMES, dtype=np.float64)
-            b_rel_sum  = float(NUM_OUTCOMES)
-
-        x_prime    = batter_rel / b_rel_sum        # normalised batter modifier
-        numerators = x_prime * pitcher_rates
-        denom      = numerators.sum()
-        probs      = (numerators / denom) if denom > 0.0 else _LEAGUE_RATES_ARRAY.copy()
-
-        # ------------------------------------------------------------------
-        # Steps 3–7 — Contextual adjustments
-        # ------------------------------------------------------------------
-        probs = self._apply_park_factors(probs, context)
-        probs = self._apply_platoon(probs, batter_stats, context)
-        probs = self._apply_umpire(probs, context)
-        probs = self._apply_catcher_framing(probs, context)
-        probs = self._apply_weather(probs, context)
-
-        # ------------------------------------------------------------------
-        # Final clip + normalisation
-        # ------------------------------------------------------------------
-        probs = _clip_and_normalise(probs)
-        return _array_to_dict(probs)
-
-    # ------------------------------------------------------------------
-    # Contextual adjustment layers (each returns a raw, un-normalised array)
-    # ------------------------------------------------------------------
-
-    def _apply_park_factors(
-        self, probs: np.ndarray, context: dict
-    ) -> np.ndarray:
-        """Scale HR, 2B, 3B, 1B by park factors then renormalise."""
-        pf_hr = float(np.clip(context.get("park_hr_factor", 1.0), 0.5, 2.0))
-        pf_2b = float(np.clip(context.get("park_2b_factor", 1.0), 0.5, 2.0))
-        pf_3b = float(np.clip(context.get("park_3b_factor", 1.0), 0.5, 2.0))
-        pf_1b = float(np.clip(context.get("park_1b_factor", 1.0), 0.5, 2.0))
-
-        probs = probs.copy()
-        probs[_HR_IDX] *= pf_hr
-        probs[_2B_IDX] *= pf_2b
-        probs[_3B_IDX] *= pf_3b
-        probs[_1B_IDX] *= pf_1b
-
-        total = probs.sum()
-        if total > 0.0:
-            probs /= total
-        return probs
-
-    def _apply_platoon(
-        self, probs: np.ndarray, batter_stats: dict, context: dict
-    ) -> np.ndarray:
-        """
-        Boost hit probabilities and reduce K probability when the batter
-        has platoon advantage (opposite hands from the pitcher).
-
-        Platoon advantage: L vs. R, R vs. L, or switch-hitter (S).
-        """
-        if "platoon_advantage" in context:
-            has_advantage = bool(context["platoon_advantage"])
+    if rng.random() < hit_prob:
+        # Determine hit type
+        xbh = XBH_PROB[contact_type]
+        r2 = rng.random()
+        if r2 < xbh["HR"] * (pitcher.hr_per_fb / MLB_AVG_HR_PER_FB if contact_type == "fly_ball" else 1.0):
+            outcome = "HR"
+        elif r2 < xbh["HR"] + xbh["3B"]:
+            outcome = "3B"
+        elif r2 < xbh["HR"] + xbh["3B"] + xbh["2B"]:
+            outcome = "2B"
         else:
-            batter_hand  = str(batter_stats.get("hand", "R")).upper()
-            pitcher_hand = str(context.get("pitcher_hand", "R")).upper()
-            has_advantage = (batter_hand == "S") or (batter_hand != pitcher_hand)
+            outcome = "1B"
+    else:
+        outcome = "out"
 
-        if not has_advantage:
-            return probs
-
-        probs = probs.copy()
-        for idx in _HIT_INDICES:
-            probs[idx] *= (1.0 + _PLATOON_HIT_BOOST)
-        probs[_K_IDX] *= (1.0 - _PLATOON_K_REDUCTION)
-
-        total = probs.sum()
-        if total > 0.0:
-            probs /= total
-        return probs
-
-    def _apply_umpire(self, probs: np.ndarray, context: dict) -> np.ndarray:
-        """
-        Scale K and BB probabilities by umpire zone-tendency factors.
-
-        umpire_k_factor  > 1 → umpire runs an expanded zone (more Ks)
-        umpire_bb_factor > 1 → umpire is generous to batters (more BBs)
-        """
-        ump_k  = float(np.clip(context.get("umpire_k_factor",  1.0), 0.5, 2.0))
-        ump_bb = float(np.clip(context.get("umpire_bb_factor", 1.0), 0.5, 2.0))
-
-        if abs(ump_k - 1.0) < 1e-6 and abs(ump_bb - 1.0) < 1e-6:
-            return probs
-
-        probs = probs.copy()
-        probs[_K_IDX]  *= ump_k
-        probs[_BB_IDX] *= ump_bb
-
-        total = probs.sum()
-        if total > 0.0:
-            probs /= total
-        return probs
-
-    def _apply_catcher_framing(
-        self, probs: np.ndarray, context: dict
-    ) -> np.ndarray:
-        """
-        Adjust K probability by catcher framing z-score.
-
-        A catcher at +1 SD above average earns ~2.5% more called strikes →
-        small but meaningful K probability boost.
-        """
-        framing_z = float(np.clip(context.get("catcher_framing_score", 0.0), -3.0, 3.0))
-        if abs(framing_z) < 1e-6:
-            return probs
-
-        multiplier = float(np.clip(1.0 + framing_z * _FRAMING_K_PER_SD, 0.5, 1.5))
-
-        probs = probs.copy()
-        probs[_K_IDX] *= multiplier
-
-        total = probs.sum()
-        if total > 0.0:
-            probs /= total
-        return probs
-
-    def _apply_weather(self, probs: np.ndarray, context: dict) -> np.ndarray:
-        """
-        Adjust HR probability based on temperature and wind direction.
-
-        Temperature effect
-        ------------------
-        Each °F above 72°F baseline adds ~0.3% to HR probability.
-        Warm air is less dense → ball carries further.
-
-        Wind effect
-        -----------
-        ``wind_to_cf`` in [-1, +1]:
-          +1.0 → wind blowing out to CF at full speed → max HR boost
-          -1.0 → wind blowing in from CF             → max HR reduction
-        ``wind_speed`` modulates magnitude (full effect at 15 mph).
-        """
-        temp       = float(np.clip(context.get("temperature",  _WEATHER_TEMP_BASELINE), 20.0, 120.0))
-        wind_speed = float(np.clip(context.get("wind_speed",   0.0), 0.0, 40.0))
-        wind_to_cf = float(np.clip(context.get("wind_to_cf",   0.0), -1.0, 1.0))
-
-        temp_adj         = _WEATHER_TEMP_COEFFICIENT * (temp - _WEATHER_TEMP_BASELINE)
-        wind_fraction    = min(wind_speed / 15.0, 1.0)  # full effect at 15 mph
-        wind_adj         = (
-            wind_to_cf * wind_fraction * _WEATHER_WIND_OUT_BOOST
-            if wind_to_cf >= 0
-            else wind_to_cf * wind_fraction * _WEATHER_WIND_IN_REDUCTION
-        )
-
-        total_adj = temp_adj + wind_adj
-        if abs(total_adj) < 1e-6:
-            return probs
-
-        probs = probs.copy()
-        probs[_HR_IDX] = max(_PROB_MIN, probs[_HR_IDX] * (1.0 + total_adj))
-
-        total = probs.sum()
-        if total > 0.0:
-            probs /= total
-        return probs
+    return MatchupResult(
+        outcome=outcome,
+        contact_type=contact_type,
+        is_hard_hit=is_hard_hit,
+        pitch_count=_sample_pitch_count(rng, outcome),
+    )
 
 
-# ===========================================================================
-#  Unified façade — MatchupModel
-# ===========================================================================
-
-class MatchupModel:
+def _sample_contact_type(
+    pitcher: PitcherProfile,
+    batter: BatterProfile,
+    rng: random.Random,
+) -> str:
     """
-    Unified interface for PA outcome probability prediction.
-
-    Tries to use a trained LightGBM model (TrainedMatchupModel) when one is
-    available; otherwise degrades silently to the statistical OddsRatioModel.
-
-    Parameters
-    ----------
-    model_path : str | Path | None
-        Path to a saved LightGBM booster.  ``None`` → always use OddsRatioModel.
-    use_ml : bool
-        If ``False``, always uses OddsRatioModel regardless of ``model_path``.
+    Sample a contact type blending pitcher and batter tendencies.
+    Uses a 50/50 blend of pitcher and batter batted-ball mix.
     """
+    fb = (pitcher.fb_pct + batter.fb_pct) / 2
+    gb = (pitcher.gb_pct + batter.gb_pct) / 2
+    ld = (pitcher.ld_pct + batter.ld_pct) / 2
+    pu = max(0.0, 1.0 - fb - gb - ld)
 
-    def __init__(
-        self,
-        model_path: Optional[str | Path] = None,
-        use_ml: bool = True,
-    ) -> None:
-        self.use_ml       = use_ml
-        self._odds_model  = OddsRatioModel()
-        self._trained_model: Optional[TrainedMatchupModel] = None
-        self._active_model: str = "odds_ratio"
+    r = rng.random()
+    if r < gb:
+        return "ground_ball"
+    r -= gb
+    if r < fb:
+        return "fly_ball"
+    r -= fb
+    if r < ld:
+        return "line_drive"
+    return "popup"
 
-        if use_ml and _LGBM_AVAILABLE:
-            trained = TrainedMatchupModel(model_path=model_path)
-            if trained.is_loaded:
-                self._trained_model = trained
-                self._active_model  = "trained_lgbm"
+
+def _sample_pitch_count(rng: random.Random, outcome: str) -> int:
+    """Sample a realistic pitch count for an at-bat given its outcome."""
+    distributions = {
+        "K": (4, 7),
+        "BB": (5, 8),
+        "HBP": (2, 5),
+        "out": (2, 5),
+        "1B": (3, 6),
+        "2B": (3, 6),
+        "3B": (4, 7),
+        "HR": (3, 7),
+    }
+    lo, hi = distributions.get(outcome, (3, 6))
+    return rng.randint(lo, hi)
+
+
+# ---------------------------------------------------------------------------
+# Multi-PA / inning simulation helpers
+# ---------------------------------------------------------------------------
+
+
+def simulate_inning(
+    pitcher: PitcherProfile,
+    lineup: list[BatterProfile],
+    start_batter_idx: int = 0,
+    *,
+    rng: Optional[random.Random] = None,
+) -> dict:
+    """
+    Simulate a single half-inning.
+
+    Args:
+        pitcher:          Pitcher profile.
+        lineup:           List of batter profiles (at least 9).
+        start_batter_idx: Index of the first batter in the lineup.
+        rng:              Optional seeded RNG.
+
+    Returns:
+        dict with keys: runs, hits, strikeouts, walks, hbp,
+                        batters_faced, pitch_count, end_batter_idx
+    """
+    rng = rng or random
+    outs = 0
+    runs = 0
+    hits = 0
+    strikeouts = 0
+    walks = 0
+    hbp = 0
+    batters_faced = 0
+    pitch_count = 0
+    bases = [False, False, False]  # 1B, 2B, 3B
+
+    batter_idx = start_batter_idx % len(lineup)
+
+    while outs < 3:
+        batter = lineup[batter_idx % len(lineup)]
+        result = simulate_plate_appearance(pitcher, batter, rng=rng)
+        batters_faced += 1
+        pitch_count += result.pitch_count
+        batter_idx += 1
+
+        if result.outcome == "K":
+            outs += 1
+            strikeouts += 1
+
+        elif result.outcome in ("BB", "HBP"):
+            if result.outcome == "BB":
+                walks += 1
             else:
-                log.info(
-                    "TrainedMatchupModel unavailable; using OddsRatioModel."
-                )
-        elif use_ml and not _LGBM_AVAILABLE:
-            log.warning(
-                "use_ml=True but LightGBM is not installed.  "
-                "Falling back to OddsRatioModel."
-            )
+                hbp += 1
+            # Force advance runners
+            if bases[2] and bases[1] and bases[0]:
+                runs += 1
+            elif bases[1] and bases[0]:
+                bases[2] = True
+            elif bases[0]:
+                bases[1] = True
+            else:
+                bases[0] = True
 
-    # ------------------------------------------------------------------
-    # Properties
-    # ------------------------------------------------------------------
+        elif result.outcome == "out":
+            outs += 1
+            # Possible sac fly (simplification: 10% of fly ball outs with runner on 3B)
+            if (
+                result.contact_type == "fly_ball"
+                and bases[2]
+                and outs < 3
+                and rng.random() < 0.10
+            ):
+                runs += 1
+                bases[2] = False
 
-    @property
-    def active_model(self) -> str:
-        """Returns ``'trained_lgbm'`` or ``'odds_ratio'``."""
-        return self._active_model
+        elif result.outcome == "1B":
+            hits += 1
+            # Advance all runners 1 base; runner on 3B scores
+            if bases[2]:
+                runs += 1
+            bases[2] = bases[1]
+            bases[1] = bases[0]
+            bases[0] = True
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        elif result.outcome == "2B":
+            hits += 1
+            # Runners on 2B+ score; batter on 2B
+            runs += sum(1 for b in bases[1:] if b)
+            bases[2] = bases[0]
+            bases[1] = True
+            bases[0] = False
 
-    def predict_pa_probs(
-        self,
-        pitcher_stats: dict,
-        batter_stats: dict,
-        context: dict,
-        features: Optional[np.ndarray] = None,
-    ) -> dict[str, float]:
-        """
-        Predict PA outcome probabilities for a specific matchup.
+        elif result.outcome == "3B":
+            hits += 1
+            runs += sum(1 for b in bases if b)
+            bases = [False, False, True]
 
-        Routes to the trained LightGBM model when ``features`` is provided
-        and a trained model is loaded; otherwise uses the odds-ratio model.
+        elif result.outcome == "HR":
+            hits += 1
+            runs += 1 + sum(1 for b in bases if b)
+            bases = [False, False, False]
 
-        Parameters
-        ----------
-        pitcher_stats : dict
-            Pitcher rate stats (see ``OddsRatioModel.predict_pa_probs``).
-        batter_stats : dict
-            Batter rate stats (see ``OddsRatioModel.predict_pa_probs``).
-        context : dict
-            Contextual factors: park, umpire, weather, etc.
-        features : np.ndarray | None
-            Pre-built feature vector (length == ``len(FEATURE_COLUMNS)``).
-            Required for the LightGBM path.  Ignored by the odds-ratio model.
+    return {
+        "runs": runs,
+        "hits": hits,
+        "strikeouts": strikeouts,
+        "walks": walks,
+        "hbp": hbp,
+        "batters_faced": batters_faced,
+        "pitch_count": pitch_count,
+        "end_batter_idx": batter_idx % len(lineup),
+    }
 
-        Returns
-        -------
-        dict[str, float]
-            Normalised probabilities summing to exactly 1.0.
-        """
-        if (
-            self._active_model == "trained_lgbm"
-            and self._trained_model is not None
-            and features is not None
-        ):
-            try:
-                return self._trained_model.predict_pa_probs(features)
-            except Exception as exc:
-                log.warning(
-                    "TrainedMatchupModel raised %s; falling back to "
-                    "OddsRatioModel for this PA.", exc
-                )
 
-        return self._odds_model.predict_pa_probs(pitcher_stats, batter_stats, context)
+# ---------------------------------------------------------------------------
+# Aggregated matchup scoring
+# ---------------------------------------------------------------------------
 
-    def explain_prediction(
-        self,
-        pitcher_stats: dict,
-        batter_stats: dict,
-        context: dict,
-    ) -> dict:
-        """
-        Glass-box explanation of model adjustments for every PA outcome.
 
-        This is BaselineMLB's key differentiator — full transparency into
-        *which factors* drove each probability up or down.
+def compute_matchup_edge(
+    pitcher: PitcherProfile,
+    batter: BatterProfile,
+    n_sims: int = 1000,
+    seed: Optional[int] = None,
+) -> dict:
+    """
+    Run *n_sims* plate-appearance simulations and return aggregate edge metrics.
 
-        For every outcome the method returns:
-          * ``base_prob``   — log5 probability before contextual adjustments
-          * ``adjustments`` — ordered dict of 5 layers, each with
-                              ``direction`` ('up'|'down'|'neutral'),
-                              ``magnitude`` (delta in probability), and
-                              human-readable ``reason``
-          * ``final_prob``  — probability after all adjustments
+    Returns a dict with:
+        k_rate, bb_rate, hit_rate, xba, edge_score
+    """
+    rng = random.Random(seed)
+    totals = {"K": 0, "BB": 0, "HBP": 0, "hit": 0, "out": 0}
 
-        Works for ALL outcomes (not just strikeouts).
-
-        Parameters
-        ----------
-        pitcher_stats, batter_stats, context : dict
-            Same inputs as ``predict_pa_probs``.
-
-        Returns
-        -------
-        dict
-            ``{'outcomes': {outcome: {...}}, 'confidence': float,
-               'active_model': str}``
-
-        Example (strikeout excerpt)
-        ---------------------------
-        ::
-
-            {
-              'strikeout': {
-                'base_prob': 0.228,
-                'adjustments': {
-                  'park_factor': {
-                      'direction': 'neutral',
-                      'magnitude': 0.0,
-                      'reason': 'Park factors do not directly affect this outcome'
-                  },
-                  'platoon': {
-                      'direction': 'down',
-                      'magnitude': -0.007,
-                      'reason': 'Batter L vs. pitcher R: platoon advantage; '
-                                'hit probs +5%, K -3%'
-                  },
-                  'umpire': {
-                      'direction': 'up',
-                      'magnitude': 0.019,
-                      'reason': 'Umpire K factor 1.15 (expanded zone +15.0% vs avg)'
-                  },
-                  'catcher_framing': {
-                      'direction': 'up',
-                      'magnitude': 0.009,
-                      'reason': 'Catcher framing z=+1.20 (above avg framing; +3.0% K)'
-                  },
-                  'weather': {
-                      'direction': 'neutral',
-                      'magnitude': -0.001,
-                      'reason': 'Temp 72°F (+0°F vs 72°F baseline), wind 0 mph neutral'
-                  }
-                },
-                'final_prob': 0.249
-              },
-              ...
-            }
-        """
-        odds = self._odds_model
-
-        pitcher_pa = int(pitcher_stats.get("sample_pa", _PA_PARTIAL))
-        batter_pa  = int(batter_stats.get("sample_pa", _PA_PARTIAL))
-        confidence = _confidence_from_sample(pitcher_pa, batter_pa)
-
-        # ---------------------------------------------------------------
-        # Stage A — base log5 probabilities (no context applied)
-        # ---------------------------------------------------------------
-        base_arr = self._compute_base_probs(pitcher_stats, batter_stats)
-
-        # ---------------------------------------------------------------
-        # Stage B — apply each layer in sequence to measure its delta
-        # ---------------------------------------------------------------
-        after_park    = odds._apply_park_factors(base_arr.copy(), context)
-        after_platoon = odds._apply_platoon(after_park.copy(), batter_stats, context)
-        after_umpire  = odds._apply_umpire(after_platoon.copy(), context)
-        after_framing = odds._apply_catcher_framing(after_umpire.copy(), context)
-        after_weather = odds._apply_weather(after_framing.copy(), context)
-
-        # Normalise every stage for accurate delta computation
-        base_norm    = _clip_and_normalise(base_arr.copy())
-        park_norm    = _clip_and_normalise(after_park.copy())
-        platoon_norm = _clip_and_normalise(after_platoon.copy())
-        umpire_norm  = _clip_and_normalise(after_umpire.copy())
-        framing_norm = _clip_and_normalise(after_framing.copy())
-        final_norm   = _clip_and_normalise(after_weather.copy())
-
-        # ---------------------------------------------------------------
-        # Context values for building reason strings
-        # ---------------------------------------------------------------
-        pf_hr       = float(context.get("park_hr_factor",         1.0))
-        pf_2b       = float(context.get("park_2b_factor",         1.0))
-        pf_3b       = float(context.get("park_3b_factor",         1.0))
-        pf_1b       = float(context.get("park_1b_factor",         1.0))
-        ump_k       = float(context.get("umpire_k_factor",        1.0))
-        ump_bb      = float(context.get("umpire_bb_factor",       1.0))
-        framing_z   = float(context.get("catcher_framing_score",  0.0))
-        temp        = float(context.get("temperature",            _WEATHER_TEMP_BASELINE))
-        wind_speed  = float(context.get("wind_speed",             0.0))
-        wind_to_cf  = float(context.get("wind_to_cf",             0.0))
-
-        batter_hand  = str(batter_stats.get("hand", "R")).upper()
-        pitcher_hand = str(context.get("pitcher_hand", "R")).upper()
-
-        if "platoon_advantage" in context:
-            has_plat = bool(context["platoon_advantage"])
+    for _ in range(n_sims):
+        result = simulate_plate_appearance(pitcher, batter, rng=rng)
+        if result.outcome == "K":
+            totals["K"] += 1
+        elif result.outcome in ("BB", "HBP"):
+            totals[result.outcome] += 1
+        elif result.outcome in ("1B", "2B", "3B", "HR"):
+            totals["hit"] += 1
         else:
-            has_plat = (batter_hand == "S") or (batter_hand != pitcher_hand)
+            totals["out"] += 1
 
-        def _direction(delta: float) -> str:
-            if delta >  0.0005:  return "up"
-            if delta < -0.0005:  return "down"
-            return "neutral"
+    n = n_sims
+    k_rate = totals["K"] / n
+    bb_rate = (totals["BB"] + totals["HBP"]) / n
+    hit_rate = totals["hit"] / n
 
-        # ---------------------------------------------------------------
-        # Build per-outcome breakdown
-        # ---------------------------------------------------------------
-        outcomes_explanation: dict = {}
+    # Edge score: how much does pitcher dominate this batter?
+    # Positive = pitcher advantage, negative = batter advantage
+    edge_score = (k_rate - MLB_AVG_K_PCT) - (hit_rate - MLB_AVG_BA)
 
-        for i, outcome in enumerate(MODEL_OUTCOMES):
-            base_p    = float(base_norm[i])
-            park_p    = float(park_norm[i])
-            platoon_p = float(platoon_norm[i])
-            umpire_p  = float(umpire_norm[i])
-            framing_p = float(framing_norm[i])
-            final_p   = float(final_norm[i])
+    return {
+        "k_rate": round(k_rate, 4),
+        "bb_rate": round(bb_rate, 4),
+        "hit_rate": round(hit_rate, 4),
+        "xba": round(hit_rate, 4),
+        "edge_score": round(edge_score, 4),
+    }
 
-            park_delta    = park_p    - base_p
-            platoon_delta = platoon_p - park_p
-            umpire_delta  = umpire_p  - platoon_p
-            framing_delta = framing_p - umpire_p
-            weather_delta = final_p   - framing_p
 
-            # ---- Park reason ----
-            if outcome == "home_run":
-                sentiment = (
-                    "hitter-friendly" if pf_hr > 1.05
-                    else "pitcher-friendly" if pf_hr < 0.95
-                    else "neutral"
-                )
-                park_reason = f"Park HR factor {pf_hr:.2f} ({sentiment})"
-            elif outcome == "double":
-                park_reason = f"Park 2B factor {pf_2b:.2f}"
-            elif outcome == "triple":
-                park_reason = f"Park 3B factor {pf_3b:.2f}"
-            elif outcome == "single":
-                park_reason = f"Park 1B factor {pf_1b:.2f}"
-            else:
-                park_reason = "Park factors do not directly affect this outcome"
+# ---------------------------------------------------------------------------
+# Lineup vs pitcher aggregate
+# ---------------------------------------------------------------------------
 
-            # ---- Platoon reason ----
-            if has_plat:
-                if batter_hand == "S":
-                    platoon_reason = (
-                        "Batter is switch-hitter (always has platoon advantage); "
-                        f"hit probs +{_PLATOON_HIT_BOOST*100:.0f}%, "
-                        f"K -{_PLATOON_K_REDUCTION*100:.0f}%"
-                    )
-                else:
-                    platoon_reason = (
-                        f"Batter {batter_hand} vs. pitcher {pitcher_hand}: "
-                        f"platoon advantage; "
-                        f"hit probs +{_PLATOON_HIT_BOOST*100:.0f}%, "
-                        f"K -{_PLATOON_K_REDUCTION*100:.0f}%"
-                    )
-            else:
-                platoon_reason = (
-                    f"Batter {batter_hand} vs. pitcher {pitcher_hand}: "
-                    "no platoon advantage (same hand)"
-                )
 
-            # ---- Umpire reason ----
-            if outcome == "strikeout":
-                ump_pct = (ump_k - 1.0) * 100
-                zone_desc = "expanded zone" if ump_pct > 0 else "tight zone"
-                umpire_reason = (
-                    f"Umpire K factor {ump_k:.2f} "
-                    f"({zone_desc} {ump_pct:+.1f}% vs avg)"
-                )
-            elif outcome == "walk":
-                ump_pct = (ump_bb - 1.0) * 100
-                zone_desc = "generous" if ump_pct > 0 else "stingy"
-                umpire_reason = (
-                    f"Umpire BB factor {ump_bb:.2f} "
-                    f"({zone_desc} {ump_pct:+.1f}% vs avg)"
-                )
-            else:
-                umpire_reason = (
-                    "Umpire tendency affects K/BB only "
-                    "(indirect renormalisation here)"
-                )
+def score_pitcher_vs_lineup(
+    pitcher: PitcherProfile,
+    lineup: list[BatterProfile],
+    n_sims: int = 500,
+    seed: Optional[int] = None,
+) -> dict:
+    """
+    Compute aggregate edge scores for a pitcher against a full lineup.
 
-            # ---- Catcher framing reason ----
-            framing_pct = framing_z * _FRAMING_K_PER_SD * 100
-            if outcome == "strikeout":
-                qual = "above avg" if framing_z > 0 else "below avg" if framing_z < 0 else "avg"
-                framing_reason = (
-                    f"Catcher framing z={framing_z:+.2f} "
-                    f"({qual} framing; {framing_pct:+.1f}% K adjustment)"
-                )
-            else:
-                framing_reason = (
-                    "Catcher framing adjusts K probability only "
-                    "(indirect renormalisation here)"
-                )
+    Returns dict with per-batter edges and overall lineup score.
+    """
+    rng_seed = seed
+    results = []
+    total_edge = 0.0
 
-            # ---- Weather reason ----
-            temp_delta_f = temp - _WEATHER_TEMP_BASELINE
-            if outcome == "home_run":
-                if wind_to_cf > 0.1:
-                    wind_desc = "blowing out"
-                elif wind_to_cf < -0.1:
-                    wind_desc = "blowing in"
-                else:
-                    wind_desc = "neutral"
-                weather_reason = (
-                    f"Temp {temp:.0f}°F ({temp_delta_f:+.0f}°F vs "
-                    f"{_WEATHER_TEMP_BASELINE:.0f}°F baseline), "
-                    f"wind {wind_speed:.0f} mph {wind_desc}"
-                )
-            else:
-                weather_reason = (
-                    "Weather (temperature/wind) adjusts HR probability only "
-                    "(indirect renormalisation here)"
-                )
+    for i, batter in enumerate(lineup):
+        edge = compute_matchup_edge(pitcher, batter, n_sims=n_sims, seed=rng_seed)
+        results.append({"order": i + 1, "batter": batter.name, **edge})
+        total_edge += edge["edge_score"]
+        if rng_seed is not None:
+            rng_seed += 1
 
-            outcomes_explanation[outcome] = {
-                "base_prob": round(base_p, 5),
-                "adjustments": {
-                    "park_factor": {
-                        "direction": _direction(park_delta),
-                        "magnitude": round(park_delta, 5),
-                        "reason":    park_reason,
-                    },
-                    "platoon": {
-                        "direction": _direction(platoon_delta),
-                        "magnitude": round(platoon_delta, 5),
-                        "reason":    platoon_reason,
-                    },
-                    "umpire": {
-                        "direction": _direction(umpire_delta),
-                        "magnitude": round(umpire_delta, 5),
-                        "reason":    umpire_reason,
-                    },
-                    "catcher_framing": {
-                        "direction": _direction(framing_delta),
-                        "magnitude": round(framing_delta, 5),
-                        "reason":    framing_reason,
-                    },
-                    "weather": {
-                        "direction": _direction(weather_delta),
-                        "magnitude": round(weather_delta, 5),
-                        "reason":    weather_reason,
-                    },
-                },
-                "final_prob": round(final_p, 5),
-            }
+    avg_edge = total_edge / len(lineup) if lineup else 0.0
 
-        return {
-            "outcomes":     outcomes_explanation,
-            "confidence":   round(confidence, 3),
-            "active_model": self._active_model,
-        }
+    return {
+        "pitcher": pitcher.name,
+        "per_batter": results,
+        "avg_edge": round(avg_edge, 4),
+        "projected_k_pct": round(
+            sum(r["k_rate"] for r in results) / len(results) if results else 0, 4
+        ),
+    }
 
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
 
-    def _compute_base_probs(
-        self, pitcher_stats: dict, batter_stats: dict
-    ) -> np.ndarray:
-        """
-        Compute log5/odds-ratio probabilities WITHOUT any contextual
-        adjustments.  Used as the baseline stage for explain_prediction().
-        """
-        pitcher_pa = int(pitcher_stats.get("sample_pa", _PA_PARTIAL))
-        batter_pa  = int(batter_stats.get("sample_pa",  _PA_PARTIAL))
+# ---------------------------------------------------------------------------
+# Strikeout projection
+# ---------------------------------------------------------------------------
 
-        pitcher_rates = np.zeros(NUM_OUTCOMES, dtype=np.float64)
-        batter_rates  = np.zeros(NUM_OUTCOMES, dtype=np.float64)
 
-        for i, outcome in enumerate(MODEL_OUTCOMES):
-            key    = f"{outcome}_rate"
-            lg_avg = LEAGUE_AVG_RATES[outcome]
-            p_raw  = float(np.clip(pitcher_stats.get(key, lg_avg), 0.0, 1.0))
-            b_raw  = float(np.clip(batter_stats.get(key,  lg_avg), 0.0, 1.0))
-            pitcher_rates[i] = _regress_toward_league(p_raw, outcome, pitcher_pa)
-            batter_rates[i]  = _regress_toward_league(b_raw, outcome, batter_pa)
+def project_strikeouts(
+    pitcher: PitcherProfile,
+    lineup: list[BatterProfile],
+    expected_ip: float = 5.5,
+    n_sims: int = 1000,
+    seed: Optional[int] = None,
+) -> dict:
+    """
+    Project strikeout total for a pitcher over *expected_ip* innings.
 
-        safe_league = np.where(_LEAGUE_RATES_ARRAY > 0.0, _LEAGUE_RATES_ARRAY, 1e-9)
-        batter_rel  = batter_rates / safe_league
-        b_sum       = batter_rel.sum()
-        if b_sum <= 0.0:
-            batter_rel = np.ones(NUM_OUTCOMES, dtype=np.float64)
-            b_sum = float(NUM_OUTCOMES)
+    Args:
+        pitcher:     Pitcher profile.
+        lineup:      Opposing lineup (list of BatterProfile).
+        expected_ip: Expected innings pitched.
+        n_sims:      Number of Monte Carlo simulations.
+        seed:        RNG seed for reproducibility.
 
-        x_prime    = batter_rel / b_sum
-        numerators = x_prime * pitcher_rates
-        denom      = numerators.sum()
-        return (numerators / denom) if denom > 0.0 else _LEAGUE_RATES_ARRAY.copy()
+    Returns:
+        dict with projection, confidence_interval, and per-sim distribution.
+    """
+    rng = random.Random(seed)
+    sim_k_totals = []
+
+    for _ in range(n_sims):
+        total_k = 0
+        total_outs = 0
+        target_outs = int(expected_ip * 3)
+        batter_idx = 0
+
+        while total_outs < target_outs:
+            batter = lineup[batter_idx % len(lineup)]
+            result = simulate_plate_appearance(pitcher, batter, rng=rng)
+            batter_idx += 1
+
+            if result.outcome == "K":
+                total_k += 1
+                total_outs += 1
+            elif result.outcome in ("out",):
+                total_outs += 1
+            elif result.outcome in ("1B", "2B", "3B", "HR"):
+                pass  # runners on base, don't increment outs
+            # BB/HBP: batter reaches, outs unchanged
+
+            # Safety valve
+            if batter_idx > 200:
+                break
+
+        sim_k_totals.append(total_k)
+
+    sim_k_totals.sort()
+    mean_k = sum(sim_k_totals) / n_sims
+    p10 = sim_k_totals[int(n_sims * 0.10)]
+    p25 = sim_k_totals[int(n_sims * 0.25)]
+    p75 = sim_k_totals[int(n_sims * 0.75)]
+    p90 = sim_k_totals[int(n_sims * 0.90)]
+
+    # Variance-based confidence
+    variance = sum((k - mean_k) ** 2 for k in sim_k_totals) / n_sims
+    std_dev = math.sqrt(variance)
+    cv = std_dev / mean_k if mean_k > 0 else 1.0
+    confidence = max(0.40, min(0.95, 1.0 - cv * 0.5))
+
+    return {
+        "projection": round(mean_k, 2),
+        "p10": p10,
+        "p25": p25,
+        "p75": p75,
+        "p90": p90,
+        "std_dev": round(std_dev, 3),
+        "confidence": round(confidence, 3),
+    }
