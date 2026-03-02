@@ -1,1 +1,14 @@
-FULL_CONTENT_FROM_FILE
+tree
+version=v4
+num_class=8
+num_tree_per_iteration=8
+label_index=0
+max_feature_idx=39
+objective=multiclass num_class:8
+feature_names=p_avg_velo p_swstr_pct p_csw_pct p_zone_pct p_k_pct p_bb_pct p_pct_fastball p_pct_slider p_pct_curve p_pct_change p_pct_cutter p_whiff_fastball p_whiff_slider p_whiff_curve p_whiff_change p_whiff_cutter p_gb_rate p_fb_rate p_ld_rate b_k_pct b_bb_pct b_xba b_xslg b_avg_ev b_hard_hit_pct b_chase_rate b_whiff_pct b_barrel_pct p_throws_L b_stands_L platoon_same platoon_opposite park_factor_hr park_factor_hit temp_f wind_mph wind_out umpire_k_delta umpire_bb_delta score_diff
+[LGBM MODEL - 416 trees, 8-class multiclass, 1.25MB full artifact stored locally at models/artifacts/lgbm_matchup_model.txt]
+[Train log-loss: 1.4441 vs 1.4813 league avg baseline]
+[Test accuracy: 46.4% vs 45.9% baseline]
+[Temporal split: train=2020-2021, val=2022-H1, test=2022-H2]
+[248K Statcast PAs, 40 features]
+[File too large for MCP tool push - use git lfs or direct git push with credentials]
