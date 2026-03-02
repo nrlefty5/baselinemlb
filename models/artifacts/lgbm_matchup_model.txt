@@ -1,1 +1,4 @@
-CONTENT_FROM_DISK
+tree
+version=v4
+num_class=8
+num_tree_per_iteration=8
