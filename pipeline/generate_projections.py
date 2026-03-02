@@ -135,7 +135,7 @@ def fetch_pitcher_k9(mlbam_id):
 
 
 # ---------------------------------------------------------------------------
-# Factor 1b: Career BB/9  (new in v2.1 -- walk projection)
+# Factor 1b: Career BB/9  (new in v2.1 — walk projection)
 # ---------------------------------------------------------------------------
 
 def fetch_pitcher_bb9(mlbam_id):
@@ -159,7 +159,7 @@ def fetch_pitcher_bb9(mlbam_id):
 
 
 # ---------------------------------------------------------------------------
-# Factor 2: Recent form (14-day K/9) -- NEW in v2.0
+# Factor 2: Recent form (14-day K/9) — NEW in v2.0
 # ---------------------------------------------------------------------------
 
 def fetch_recent_k9(mlbam_id, season=None):
@@ -206,7 +206,7 @@ def fetch_recent_k9(mlbam_id, season=None):
 
 
 # ---------------------------------------------------------------------------
-# Factor 3: Opponent team K% -- NEW in v2.0
+# Factor 3: Opponent team K% — NEW in v2.0
 # ---------------------------------------------------------------------------
 
 def fetch_team_k_pct(team_name, season=None):
@@ -254,7 +254,7 @@ def fetch_team_k_pct(team_name, season=None):
 
 
 # ---------------------------------------------------------------------------
-# Factor 4: Pitcher-specific expected IP -- NEW in v2.0
+# Factor 4: Pitcher-specific expected IP — NEW in v2.0
 # ---------------------------------------------------------------------------
 
 def fetch_pitcher_avg_ip(mlbam_id, season=None):
@@ -335,7 +335,7 @@ def fetch_game_officials(game_pk):
 
 
 # ---------------------------------------------------------------------------
-# Core projection function -- ENHANCED v2.1
+# Core projection function — ENHANCED v2.1
 # ---------------------------------------------------------------------------
 
 def project_pitcher(mlbam_id, player_name, opponent, venue, game_pk=None):
@@ -345,17 +345,17 @@ def project_pitcher(mlbam_id, player_name, opponent, venue, game_pk=None):
     Factors:
       1. Blended K/9 (career 70% + recent 14-day 30%)
       2. Park K-factor
-      3. Umpire strike tendency   (via lib.framing -- applied ONCE)
-      4. Catcher framing quality  (via lib.framing -- applied ONCE)
+      3. Umpire strike tendency   (via lib.framing — applied ONCE)
+      4. Catcher framing quality  (via lib.framing — applied ONCE)
       5. Opponent team K%
       6. Pitcher-specific expected IP
-      7. Walk projection: career BB/9 x expected_ip x umpire_bb_factor x catcher_bb_factor
+      7. Walk projection: career BB/9 × expected_ip × umpire_bb_factor × catcher_bb_factor
 
     Returns a list of two projection dicts: pitcher_strikeouts and pitcher_walks.
 
     Note: the ``umpire_map`` parameter used in v2.0 has been removed.
     The composite_score-based umpire_k_adj that created double-counting is
-    gone -- umpire effect is now applied exactly once via lib.framing.
+    gone — umpire effect is now applied exactly once via lib.framing.
     """
     # Factor 1: Career K/9 and BB/9
     career_k9 = fetch_pitcher_k9(mlbam_id)
@@ -457,7 +457,7 @@ def project_pitcher(mlbam_id, player_name, opponent, venue, game_pk=None):
         "opp_k_pct": round(opp_k_pct, 3),
         "opp_k_factor": round(opp_k_factor, 3),
         "venue": venue,
-        # Framing factors -- applied ONCE (v2.1 fix)
+        # Framing factors — applied ONCE (v2.1 fix)
         "umpire_name": umpire_name,
         "umpire_k_factor": round(umpire_k_factor, 4),
         "umpire_bb_factor": round(umpire_bb_factor, 4),
