@@ -4,12 +4,18 @@
 # =============================================================================
 
 .PHONY: help simulate backtest train refresh-data test lint test-python \
-        test-frontend projections grade props setup clean full-pipeline
+        test-frontend projections grade props setup clean full-daily-pipeline \
+        backfill-statcast build-training-data train-model full-pipeline \
+        quick-test-pipeline
 
 PYTHON ?= python3.11
 PIP ?= pip
 NPM ?= npm
 NUM_SIMS ?= 10000
+
+# Data pipeline year range (override on command line: make backfill-statcast START_YEAR=2023)
+START_YEAR ?= 2020
+END_YEAR   ?= 2025
 
 CYAN  := \033[36m
 GREEN := \033[32m
@@ -20,7 +26,7 @@ help: ## Show available commands
 	@echo "$(CYAN)Baseline MLB — Development Commands$(RESET)"
 	@echo ""
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-20s$(RESET) %s\n", $$1, $$2}'
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-24s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 
 setup: ## Install all dependencies (Python + Node)
@@ -89,7 +95,57 @@ clean: ## Remove cached data and build artifacts
 	rm -rf data/*.json data/training/ __pycache__ .pytest_cache .ruff_cache
 	rm -rf frontend/.next frontend/node_modules/.cache
 
-full-pipeline: ## Run the complete daily pipeline end-to-end
+full-daily-pipeline: ## Run the complete daily sim pipeline end-to-end (refresh → simulate → grade)
 	$(MAKE) refresh-data
 	$(MAKE) simulate
 	$(MAKE) grade
+
+# =============================================================================
+# Data pipeline targets (Statcast backfill → feature build → model training)
+# Override year range: make backfill-statcast START_YEAR=2023 END_YEAR=2025
+# =============================================================================
+
+backfill-statcast: ## Download Statcast PA features (START_YEAR–END_YEAR)
+	@echo "$(CYAN)Backfilling Statcast data $(START_YEAR)–$(END_YEAR)...$(RESET)"
+	@mkdir -p data
+	$(PYTHON) pipeline/fetch_statcast_historical.py \
+		--start-year $(START_YEAR) \
+		--end-year $(END_YEAR)
+	@echo "$(GREEN)Statcast backfill complete.$(RESET)"
+
+build-training-data: ## Build train/test parquet splits from PA features
+	@echo "$(CYAN)Building training dataset...$(RESET)"
+	@mkdir -p data/training
+	$(PYTHON) pipeline/build_training_dataset.py \
+		--input data/statcast_pa_features_$(START_YEAR)_$(END_YEAR).parquet \
+		--output-dir data/training
+	@echo "$(GREEN)Training dataset ready in data/training/.$(RESET)"
+
+train-model: ## Train LightGBM matchup model (5-fold CV + final)
+	@echo "$(CYAN)Training LightGBM matchup model...$(RESET)"
+	@mkdir -p models/artifacts
+	$(PYTHON) -m models.train_model \
+		--data-dir data/training \
+		--artifact-dir models/artifacts
+	@echo "$(GREEN)Model artifacts written to models/artifacts/.$(RESET)"
+
+full-pipeline: ## Full ML pipeline: backfill-statcast → build-training-data → train-model
+	@echo "$(CYAN)Running full ML data pipeline ($(START_YEAR)–$(END_YEAR))...$(RESET)"
+	$(MAKE) backfill-statcast START_YEAR=$(START_YEAR) END_YEAR=$(END_YEAR)
+	$(MAKE) build-training-data START_YEAR=$(START_YEAR) END_YEAR=$(END_YEAR)
+	$(MAKE) train-model
+	@echo "$(GREEN)Full ML pipeline complete.$(RESET)"
+
+quick-test-pipeline: ## Quick single-season pipeline test (2024 only, no CV)
+	@echo "$(CYAN)Running quick test pipeline (2024, no CV)...$(RESET)"
+	@mkdir -p data data/training models/artifacts
+	$(PYTHON) pipeline/fetch_statcast_historical.py \
+		--start-year 2024 --end-year 2024
+	$(PYTHON) pipeline/build_training_dataset.py \
+		--input data/statcast_pa_features_2024_2024.parquet \
+		--output-dir data/training
+	$(PYTHON) -m models.train_model \
+		--data-dir data/training \
+		--artifact-dir models/artifacts \
+		--no-cv
+	@echo "$(GREEN)Quick test pipeline complete.$(RESET)"
