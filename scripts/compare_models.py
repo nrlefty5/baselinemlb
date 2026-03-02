@@ -156,7 +156,7 @@ def _extract_summary_metrics(
       accuracy_by_type.{K,TB,H,HR}.{mae, within_1, within_2, brier, roi_pct}
     """
     by_type_raw = summary.get("by_prop_type", {})
-    roi_by_tier = summary.get("roi_by_confidence_tier", {})
+    summary.get("roi_by_confidence_tier", {})
     overall_pl = summary.get("overall_pl", {})
     calibration = summary.get("calibration", {})
 
