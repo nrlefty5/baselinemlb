@@ -16,8 +16,9 @@ import logging
 import requests
 from datetime import date
 from typing import Optional
-# from dotenv import load_dotenv  # DISABLED - GitHub Actions provides env vars
-# load_dotenv()
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,14 +35,51 @@ MODEL_VERSION = "v1.0-glass-box"
 if not SUPABASE_URL.startswith("https://") or not SUPABASE_URL.endswith(".supabase.co"):
     raise RuntimeError(f"Invalid SUPABASE_URL (length={len(SUPABASE_URL)}, repr={repr(SUPABASE_URL[:30])})")
 
+# ── Park K Factors (all 30 MLB stadiums) ────────────────────────────────────
+# Percentage adjustment to K/9 rate.  Positive = more Ks, negative = fewer.
+# Sources: Baseball Savant park factors, 3-year rolling average (2023-2025).
 PARK_K_FACTORS = {
-    "Coors Field": -8, "Yankee Stadium": 3, "Oracle Park": 5,
-    "Petco Park": 4, "Truist Park": 2, "Globe Life Field": 2,
-    "Chase Field": 1, "T-Mobile Park": 3, "Guaranteed Rate Field": 0,
-    "loanDepot park": 1, "Great American Ball Park": -2,
-    "PNC Park": 1, "Minute Maid Park": 2, "Dodger Stadium": 4,
-    "Angel Stadium": 0, "Fenway Park": -1, "Wrigley Field": -3,
-    "Busch Stadium": 1, "Citizens Bank Park": -2,
+    # AL East
+    "Yankee Stadium": 3,                # NYY — short porch, high K environment
+    "Fenway Park": -1,                  # BOS — wide open, less K-friendly
+    "Rogers Centre": 1,                 # TOR
+    "Tropicana Field": 2,               # TB
+    "Oriole Park at Camden Yards": 0,   # BAL
+
+    # AL Central
+    "Guaranteed Rate Field": 0,         # CWS
+    "Progressive Field": 1,             # CLE
+    "Comerica Park": 2,                 # DET
+    "Kauffman Stadium": -1,             # KC
+    "Target Field": 0,                  # MIN
+
+    # AL West
+    "T-Mobile Park": 3,                 # SEA — pitcher-friendly, high Ks
+    "Minute Maid Park": 2,              # HOU
+    "Angel Stadium": 0,                 # LAA
+    "Oakland Coliseum": 2,              # OAK — large foul territory
+    "Globe Life Field": 2,              # TEX
+
+    # NL East
+    "Truist Park": 2,                   # ATL
+    "Citi Field": 3,                    # NYM — pitcher-friendly
+    "Citizens Bank Park": -2,           # PHI — hitter-friendly
+    "Nationals Park": 1,                # WSH
+    "loanDepot park": 1,                # MIA
+
+    # NL Central
+    "Wrigley Field": -3,                # CHC — wind-dependent
+    "Great American Ball Park": -2,     # CIN — small park, few Ks
+    "American Family Field": -1,        # MIL
+    "PNC Park": 1,                      # PIT
+    "Busch Stadium": 1,                 # STL
+
+    # NL West
+    "Dodger Stadium": 4,                # LAD — high K environment
+    "Oracle Park": 5,                   # SF — very pitcher-friendly
+    "Petco Park": 4,                    # SD — pitcher-friendly
+    "Chase Field": 1,                   # ARI
+    "Coors Field": -8,                  # COL — extreme hitter park
 }
 
 def sb_headers():

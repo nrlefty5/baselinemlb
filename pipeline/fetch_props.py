@@ -2,9 +2,9 @@ import os
 import requests
 from datetime import date
 from supabase import create_client, Client
-# from dotenv import load_dotenv  # DISABLED - GitHub Actions provides env vars
+from dotenv import load_dotenv
 
-# load_dotenv()
+load_dotenv()
 
 # ── Clients ────────────────────────────────────────────────────────────────────
 ODDS_API_KEY = os.getenv("ODDS_API_KEY")
@@ -50,75 +50,6 @@ def get_sport_key() -> str:
     return None
 
 
-# ── Player name → mlbam_id matching ──────────────────────────────────────────
-
-def load_player_name_map() -> dict:
-    """
-    Build a lookup dict from player names to mlbam_id using the players table.
-    Returns dict: normalized_name -> mlbam_id
-    Handles common name variations (Jr., III, accents, etc.)
-    """
-    try:
-        resp = supabase.table("players").select("mlbam_id, full_name").execute()
-        players = resp.data or []
-    except Exception as e:
-        print(f" WARNING: Could not load players for name matching: {e}")
-        return {}
-
-    name_map = {}
-    for p in players:
-        mlbam_id = p.get("mlbam_id")
-        full_name = p.get("full_name", "")
-        if not mlbam_id or not full_name:
-            continue
-
-        # Store exact name
-        name_map[full_name.strip().lower()] = mlbam_id
-
-        # Also store without suffixes (Jr., Sr., II, III, IV)
-        cleaned = full_name.strip()
-        for suffix in [" Jr.", " Sr.", " III", " II", " IV", " V"]:
-            if cleaned.endswith(suffix):
-                cleaned = cleaned[: -len(suffix)].strip()
-                name_map[cleaned.lower()] = mlbam_id
-                break
-
-    print(f" Loaded {len(name_map)} player name mappings for mlbam_id matching")
-    return name_map
-
-
-def match_player_name(player_name: str, name_map: dict) -> int | None:
-    """
-    Attempt to match a prop player name to an mlbam_id.
-    Tries exact match first, then normalized variations.
-    """
-    if not player_name or not name_map:
-        return None
-
-    normalized = player_name.strip().lower()
-
-    # Exact match
-    if normalized in name_map:
-        return name_map[normalized]
-
-    # Try without suffixes
-    for suffix in [" jr.", " sr.", " iii", " ii", " iv", " v"]:
-        if normalized.endswith(suffix):
-            trimmed = normalized[: -len(suffix)].strip()
-            if trimmed in name_map:
-                return name_map[trimmed]
-
-    # Try matching "Last, First" format (some APIs use this)
-    if "," in normalized:
-        parts = [p.strip() for p in normalized.split(",", 1)]
-        if len(parts) == 2:
-            reordered = f"{parts[1]} {parts[0]}"
-            if reordered in name_map:
-                return name_map[reordered]
-
-    return None
-
-
 def fetch_events(sport: str) -> list[dict]:
     """Return today's MLB event IDs from The Odds API."""
     url = f"{BASE_URL}/sports/{sport}/events"
@@ -147,7 +78,7 @@ def fetch_player_props(sport: str, event_id: str) -> dict:
     return r.json()
 
 
-def parse_props(event_data: dict, name_map: dict) -> list[dict]:
+def parse_props(event_data: dict) -> list[dict]:
     """Flatten bookmaker/market/outcome structure into prop rows."""
     rows = []
 
@@ -162,17 +93,11 @@ def parse_props(event_data: dict, name_map: dict) -> list[dict]:
         for market in bm.get("markets", []):
             market_key = market["key"]
             for outcome in market.get("outcomes", []):
-                player_name = outcome.get("description") or ""
-
-                # Match player name to mlbam_id
-                mlbam_id = match_player_name(player_name, name_map)
-
                 rows.append(
                     {
                         "external_id": f"{event_id}_{book}_{market_key}_{outcome.get('description', '')}_{outcome['name']}",
                         "source": book,
-                        "player_name": player_name,
-                        "mlbam_id": mlbam_id,
+                        "player_name": outcome.get("description") or "",
                         "stat_type": market_key,
                         "line": outcome.get("point"),
                         "over_odds": outcome["price"] if outcome["name"] == "Over" else None,
@@ -204,11 +129,6 @@ def upsert_props(rows: list[dict]) -> None:
     # Filter out rows with no line (some bookmakers omit point for certain markets)
     clean = [r for r in clean if r.get("line") is not None]
 
-    # Track matching stats
-    matched = sum(1 for r in clean if r.get("mlbam_id") is not None)
-    total = len(clean)
-    print(f" Player matching: {matched}/{total} props linked to mlbam_id ({matched/total*100:.1f}%)" if total > 0 else "")
-
     for i in range(0, len(clean), 500):
         batch = clean[i : i + 500]
         supabase.table("props").upsert(batch, on_conflict="external_id").execute()
@@ -230,14 +150,11 @@ def main():
         print(" No events today. Done.")
         return
 
-    # Load player name map for mlbam_id matching
-    name_map = load_player_name_map()
-
     all_rows = []
     for event in events:
         try:
             data = fetch_player_props(sport, event["id"])
-            rows = parse_props(data, name_map)
+            rows = parse_props(data)
             all_rows.extend(rows)
             print(f" {event['home_team']} vs {event['away_team']}: {len(rows)} prop rows")
         except Exception as e:

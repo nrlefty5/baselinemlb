@@ -30,6 +30,7 @@ const MARKET_LABELS: Record<string, string> = {
   batter_rbis: 'RBIs',
   batter_strikeouts: 'Strikeouts',
   batter_walks: 'Walks',
+  batter_total_bases: 'Total Bases',
   pitcher_strikeouts: 'Pitcher Ks',
   pitcher_hits_allowed: 'Hits Allowed',
   pitcher_walks: 'Walks Allowed',
@@ -38,7 +39,8 @@ const MARKET_LABELS: Record<string, string> = {
 }
 
 function PropRow({ prop }: { prop: any }) {
-  const marketLabel = MARKET_LABELS[prop.market_key] || prop.market_key
+  // Fix: use prop.stat_type (actual DB column), not prop.market_key
+  const marketLabel = MARKET_LABELS[prop.stat_type] || prop.stat_type
   const hasEdge = prop.edge_pct && Math.abs(prop.edge_pct) >= 3
   const edgeColor = hasEdge
     ? prop.edge_pct > 0
@@ -50,7 +52,7 @@ function PropRow({ prop }: { prop: any }) {
     <tr className="border-b border-gray-700 hover:bg-gray-750 transition-colors">
       <td className="py-3 px-4">
         <div className="font-medium text-white">{prop.player_name}</div>
-        <div className="text-xs text-slate-500">{prop.team_abbr || ''}</div>
+        <div className="text-xs text-slate-500">{prop.source || ''}</div>
       </td>
       <td className="py-3 px-4 text-slate-300">{marketLabel}</td>
       <td className="py-3 px-4 text-center">
@@ -79,20 +81,6 @@ function PropRow({ prop }: { prop: any }) {
           <span className="text-slate-600">--</span>
         )}
       </td>
-      <td className="py-3 px-4 text-center">
-        {prop.grade ? (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-            prop.grade === 'A' ? 'bg-green-900 text-green-300' :
-            prop.grade === 'B' ? 'bg-blue-900 text-blue-300' :
-            prop.grade === 'C' ? 'bg-yellow-900 text-yellow-300' :
-            'bg-gray-700 text-slate-400'
-          }`}>
-            {prop.grade}
-          </span>
-        ) : (
-          <span className="text-slate-600">--</span>
-        )}
-      </td>
     </tr>
   )
 }
@@ -107,8 +95,9 @@ export default async function PropsPage() {
     timeZone: 'America/New_York',
   })
 
+  // Fix: group by prop.stat_type (actual DB column), not prop.market_key
   const byMarket = props.reduce((acc: any, prop: any) => {
-    const key = prop.market_key || 'other'
+    const key = prop.stat_type || 'other'
     if (!acc[key]) acc[key] = []
     acc[key].push(prop)
     return acc
@@ -117,7 +106,7 @@ export default async function PropsPage() {
   return (
     <div>
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Today's Props</h1>
+        <h1 className="text-3xl font-bold text-white mb-2">Today&apos;s Props</h1>
         <p className="text-slate-400">
           {today} &bull; {props.length} lines tracked
         </p>
@@ -125,7 +114,7 @@ export default async function PropsPage() {
 
       {props.length === 0 ? (
         <div className="text-center py-16">
-          <div className="text-4xl mb-4">📊</div>
+          <div className="text-4xl mb-4">&#x1F4CA;</div>
           <h2 className="text-xl font-semibold text-slate-300 mb-2">No props data yet</h2>
           <p className="text-slate-500">
             {!supabaseUrl
@@ -133,12 +122,12 @@ export default async function PropsPage() {
               : 'Prop lines are fetched 4x daily starting Opening Day 2026. Check back then!'}
           </p>
           <div className="mt-8 p-4 bg-gray-900 rounded-lg border border-gray-700 max-w-md mx-auto text-sm text-slate-400">
-            <p className="font-medium text-slate-300 mb-2">What you'll see here:</p>
+            <p className="font-medium text-slate-300 mb-2">What you&apos;ll see here:</p>
             <ul className="space-y-1 text-left">
-              <li>• Player prop lines from The Odds API</li>
-              <li>• Our model's edge % vs the market</li>
-              <li>• Letter grades (A/B/C) for strongest plays</li>
-              <li>• Updated 4x daily (8am, 10:30am, 4:30pm ET)</li>
+              <li>&#x2022; Player prop lines from The Odds API</li>
+              <li>&#x2022; Our model&apos;s edge % vs the market</li>
+              <li>&#x2022; Over/under odds from major sportsbooks</li>
+              <li>&#x2022; Updated 4x daily (8am, 10:30am, 4:30pm ET)</li>
             </ul>
           </div>
         </div>
@@ -162,12 +151,11 @@ export default async function PropsPage() {
                       <th className="py-2 px-4 text-xs font-medium text-slate-400 uppercase tracking-wider text-center">Over</th>
                       <th className="py-2 px-4 text-xs font-medium text-slate-400 uppercase tracking-wider text-center">Under</th>
                       <th className="py-2 px-4 text-xs font-medium text-slate-400 uppercase tracking-wider text-center">Edge</th>
-                      <th className="py-2 px-4 text-xs font-medium text-slate-400 uppercase tracking-wider text-center">Grade</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-700">
                     {(marketProps as any[]).map((prop: any, i: number) => (
-                      <PropRow key={`${prop.player_name}-${prop.market_key}-${i}`} prop={prop} />
+                      <PropRow key={`${prop.player_name}-${prop.stat_type}-${i}`} prop={prop} />
                     ))}
                   </tbody>
                 </table>

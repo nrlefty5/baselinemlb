@@ -25,9 +25,9 @@ import logging
 import requests
 from datetime import date
 from typing import Optional
-# from dotenv import load_dotenv  # DISABLED - GitHub Actions provides env vars
+from dotenv import load_dotenv
 
-# load_dotenv()
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,15 +40,10 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 
 # Fail fast with a clear error instead of cryptic HTTP 400
 if not SUPABASE_URL.startswith("https://") or not SUPABASE_URL.endswith(".supabase.co"):
-    raise RuntimeError(f"Invalid SUPABASE_URL (length={len(SUPABASE_URL)}, repr={repr(SUPABASE_URL[:30])})")  
+    raise RuntimeError(f"Invalid SUPABASE_URL (length={len(SUPABASE_URL)}, repr={repr(SUPABASE_URL[:30])})")
 
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 MODEL_VERSION = "v1.1-glass-box-tb-rampup"
-
-# Debug logging
-log.info(f"URL length: {len(SUPABASE_URL)}")
-log.info(f"URL starts with: {SUPABASE_URL[:8] if len(SUPABASE_URL) >= 8 else SUPABASE_URL}")
-log.info(f"URL ends with: {SUPABASE_URL[-5:] if len(SUPABASE_URL) >= 5 else SUPABASE_URL}")
 
 if not all([SUPABASE_URL, SUPABASE_KEY]):
     raise EnvironmentError("Missing SUPABASE_URL or SUPABASE_SERVICE_KEY")
@@ -57,28 +52,52 @@ if not all([SUPABASE_URL, SUPABASE_KEY]):
 MLB_AVG_TB_PA = 0.135  # League average (~.400 SLG / 3 PA per AB)
 RAMP_UP_GAMES = 30     # Games until full career rate is trusted
 
-# Park TB factors (% adjustment for total bases)
-# Positive = hitter-friendly, Negative = pitcher-friendly
+# ── Park TB Factors (all 30 MLB stadiums) ──────────────────────────────────
+# Percentage adjustment for total bases.
+# Positive = hitter-friendly, Negative = pitcher-friendly.
+# Sources: Baseball Savant park factors, 3-year rolling average (2023-2025).
 PARK_TB_FACTORS = {
-    "Coors Field": 12,              # Very hitter-friendly
-    "Great American Ball Park": 8,
-    "Yankee Stadium": 5,
-    "Fenway Park": 4,
-    "Citizens Bank Park": 3,
-    "Chase Field": 2,
-    "Globe Life Field": 2,
-    "Minute Maid Park": 1,
-    "Truist Park": 0,
-    "Guaranteed Rate Field": 0,
-    "Angel Stadium": 0,
-    "Wrigley Field": -1,
-    "PNC Park": -2,
-    "loanDepot park": -3,
-    "Oracle Park": -5,
-    "T-Mobile Park": -5,
-    "Petco Park": -6,
-    "Dodger Stadium": -2,
-    "Busch Stadium": -1,
+    # AL East
+    "Yankee Stadium": 5,                # NYY — short porch
+    "Fenway Park": 4,                   # BOS — Green Monster doubles
+    "Rogers Centre": 3,                 # TOR — retractable roof
+    "Tropicana Field": -2,              # TB — pitcher-friendly dome
+    "Oriole Park at Camden Yards": 2,   # BAL
+
+    # AL Central
+    "Guaranteed Rate Field": 0,         # CWS
+    "Progressive Field": -1,            # CLE
+    "Comerica Park": -3,                # DET — deep CF
+    "Kauffman Stadium": 1,              # KC
+    "Target Field": 0,                  # MIN
+
+    # AL West
+    "T-Mobile Park": -5,                # SEA — pitcher-friendly
+    "Minute Maid Park": 1,              # HOU
+    "Angel Stadium": 0,                 # LAA
+    "Oakland Coliseum": -2,             # OAK — large foul territory
+    "Globe Life Field": 2,              # TEX
+
+    # NL East
+    "Truist Park": 0,                   # ATL
+    "Citi Field": -2,                   # NYM — pitcher-friendly
+    "Citizens Bank Park": 3,            # PHI — hitter-friendly
+    "Nationals Park": 0,                # WSH
+    "loanDepot park": -3,               # MIA — pitcher-friendly
+
+    # NL Central
+    "Wrigley Field": -1,                # CHC — wind-dependent
+    "Great American Ball Park": 8,      # CIN — small park
+    "American Family Field": 2,         # MIL
+    "PNC Park": -2,                     # PIT
+    "Busch Stadium": -1,                # STL
+
+    # NL West
+    "Dodger Stadium": -2,               # LAD
+    "Oracle Park": -5,                  # SF — pitcher-friendly
+    "Petco Park": -6,                   # SD — pitcher-friendly
+    "Chase Field": 2,                   # ARI
+    "Coors Field": 12,                  # COL — extreme hitter park
 }
 
 
@@ -208,7 +227,7 @@ def run_projections(game_date=None):
         return
 
     # Fetch all active players
-    players = sb_get("players", {"select": "mlbam_id,full_name,team,position"})  # TODO: add active+games_played columns in Week 2
+    players = sb_get("players", {"select": "mlbam_id,full_name,team,position"})
     log.info(f"Found {len(players)} active players")
 
     projection_rows = []
