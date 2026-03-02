@@ -24,10 +24,10 @@ Output:
     Upserts rows to the `game_weather` table in Supabase.
 """
 
-import sys
-import json
 import argparse
+import json
 import logging
+import sys
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -37,7 +37,7 @@ import requests
 
 # ── Project imports ───────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from lib.supabase import sb_upsert, sb_get
+from lib.supabase import sb_get, sb_upsert
 
 logging.basicConfig(
     level=logging.INFO,
