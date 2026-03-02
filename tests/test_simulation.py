@@ -869,44 +869,43 @@ class TestGameSimulator:
         self.matchup_model = MockMatchupModel()
         self.cfg = SimulationConfig(NUM_SIMULATIONS=100, RANDOM_SEED=42)
         self.sim = GameSimulator(
-            game_data=self.game_data,
             matchup_model=self.matchup_model,
             config=self.cfg,
         )
 
     def test_run_returns_simulation_result(self):
         """GameSimulator.run() returns a SimulationResult."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         assert isinstance(result, SimulationResult)
 
     def test_win_probs_sum_to_one(self):
         """away_win_prob + home_win_prob + tie_prob == 1.0."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         total = result.away_win_prob + result.home_win_prob + result.tie_prob
         assert abs(total - 1.0) < 1e-9, f"Win probs sum = {total}"
 
     def test_win_probs_in_range(self):
         """All win probabilities are in [0, 1]."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         assert 0.0 <= result.away_win_prob <= 1.0
         assert 0.0 <= result.home_win_prob <= 1.0
         assert 0.0 <= result.tie_prob <= 1.0
 
     def test_total_runs_non_negative(self):
         """Average runs scored per team is non-negative."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         assert result.avg_away_runs >= 0.0
         assert result.avg_home_runs >= 0.0
 
     def test_player_stats_present(self):
         """SimulationResult contains player_stats dict with at least one entry."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         assert isinstance(result.player_stats, dict)
         assert len(result.player_stats) > 0
 
     def test_player_stats_hits_non_negative(self):
         """Every player's average hits is non-negative."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         for player_id, stats in result.player_stats.items():
             assert stats.get("avg_hits", 0) >= 0.0, (
                 f"Player {player_id} has negative avg_hits"
@@ -914,7 +913,7 @@ class TestGameSimulator:
 
     def test_player_stats_contains_lineup_players(self):
         """All lineup players appear in player_stats."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         for player in self.away_lineup + self.home_lineup:
             pid = player["mlbam_id"]
             assert pid in result.player_stats, (
@@ -923,7 +922,7 @@ class TestGameSimulator:
 
     def test_simulation_count_matches_config(self):
         """The internal simulation ran exactly NUM_SIMULATIONS times."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         assert result.num_simulations == self.cfg.NUM_SIMULATIONS
 
     def test_random_seed_reproducibility(self):
@@ -931,13 +930,13 @@ class TestGameSimulator:
         cfg1 = SimulationConfig(NUM_SIMULATIONS=50, RANDOM_SEED=99)
         cfg2 = SimulationConfig(NUM_SIMULATIONS=50, RANDOM_SEED=99)
         sim1 = GameSimulator(
-            game_data=self.game_data, matchup_model=self.matchup_model, config=cfg1
+            matchup_model=self.matchup_model, config=cfg1
         )
         sim2 = GameSimulator(
-            game_data=self.game_data, matchup_model=self.matchup_model, config=cfg2
+            matchup_model=self.matchup_model, config=cfg2
         )
-        r1 = sim1.run()
-        r2 = sim2.run()
+        r1 = sim1.simulate_game(self.game_data)
+        r2 = sim2.simulate_game(self.game_data)
         assert r1.away_win_prob == r2.away_win_prob
         assert r1.home_win_prob == r2.home_win_prob
         assert r1.avg_away_runs == r2.avg_away_runs
@@ -947,13 +946,13 @@ class TestGameSimulator:
         cfg1 = SimulationConfig(NUM_SIMULATIONS=200, RANDOM_SEED=1)
         cfg2 = SimulationConfig(NUM_SIMULATIONS=200, RANDOM_SEED=2)
         sim1 = GameSimulator(
-            game_data=self.game_data, matchup_model=self.matchup_model, config=cfg1
+            matchup_model=self.matchup_model, config=cfg1
         )
         sim2 = GameSimulator(
-            game_data=self.game_data, matchup_model=self.matchup_model, config=cfg2
+            matchup_model=self.matchup_model, config=cfg2
         )
-        r1 = sim1.run()
-        r2 = sim2.run()
+        r1 = sim1.simulate_game(self.game_data)
+        r2 = sim2.simulate_game(self.game_data)
         # It is astronomically unlikely both are identical with 200 sims
         assert (
             r1.away_win_prob != r2.away_win_prob
@@ -962,32 +961,32 @@ class TestGameSimulator:
 
     def test_result_has_score_distribution(self):
         """SimulationResult contains a score_distribution dict."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         assert hasattr(result, "score_distribution")
         assert isinstance(result.score_distribution, dict)
 
     def test_score_distribution_probabilities_sum_to_one(self):
         """All values in score_distribution sum to approximately 1.0."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         total = sum(result.score_distribution.values())
         assert abs(total - 1.0) < 1e-6, f"Score dist sum = {total}"
 
     def test_over_under_line_returns_probs(self):
         """get_over_under returns a dict with 'over' and 'under' keys."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         ou = result.get_over_under(line=8.5)
         assert "over" in ou and "under" in ou
         assert abs(ou["over"] + ou["under"] - 1.0) < 1e-9
 
     def test_over_under_at_zero_line_all_over(self):
         """Line of 0.0 means virtually all simulated games go over (≥1 total run)."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         ou = result.get_over_under(line=0.0)
         assert ou["over"] > 0.99, f"Expected >99% over at line 0.0, got {ou['over']:.4f}"
 
     def test_over_under_at_huge_line_all_under(self):
         """Line of 100.0 means virtually all simulated games go under."""
-        result = self.sim.run()
+        result = self.sim.simulate_game(self.game_data)
         ou = result.get_over_under(line=100.0)
         assert ou["under"] > 0.99, (
             f"Expected >99% under at line 100.0, got {ou['under']:.4f}"
@@ -1019,12 +1018,11 @@ class TestGameSimulator:
         (with a fixed seed, results should be identical)."""
         cfg = SimulationConfig(NUM_SIMULATIONS=50, RANDOM_SEED=7)
         sim = GameSimulator(
-            game_data=self.game_data,
             matchup_model=self.matchup_model,
             config=cfg,
         )
-        r1 = sim.run()
-        r2 = sim.run()
+        r1 = sim.simulate_game(self.game_data)
+        r2 = sim.simulate_game(self.game_data)
         assert r1.away_win_prob == r2.away_win_prob
         assert r1.home_win_prob == r2.home_win_prob
 
@@ -1042,14 +1040,14 @@ class TestGameSimulator:
 
         cfg = SimulationConfig(NUM_SIMULATIONS=200, RANDOM_SEED=42)
         sim_highk = GameSimulator(
-            game_data=self.game_data, matchup_model=HighKModel(), config=cfg
+            matchup_model=HighKModel(), config=cfg
         )
-        result_highk = sim_highk.run()
+        result_highk = sim_highk.simulate_game(self.game_data)
 
         sim_baseline = GameSimulator(
-            game_data=self.game_data, matchup_model=self.matchup_model, config=cfg
+            matchup_model=self.matchup_model, config=cfg
         )
-        result_baseline = sim_baseline.run()
+        result_baseline = sim_baseline.simulate_game(self.game_data)
 
         # High-K model should produce more total strikeouts
         def total_ks(result):
@@ -1083,11 +1081,10 @@ class TestPropAnalyzer:
 
         cfg = SimulationConfig(NUM_SIMULATIONS=500, RANDOM_SEED=42)
         sim = GameSimulator(
-            game_data=game_data,
             matchup_model=MockMatchupModel(),
             config=cfg,
         )
-        self.result = sim.run()
+        self.result = sim.simulate_game(game_data)
         self.analyzer = PropAnalyzer(simulation_result=self.result)
 
         # Pick a player that exists in player_stats
