@@ -266,17 +266,14 @@ class PropAnalyzer:
 
         if best_edge < ev_threshold:
             recommended_side = "pass"
-            active_edge = 0.0
             active_sim_prob = 0.5
             active_decimal_odds = 2.0
         elif edge_over >= edge_under:
             recommended_side = "over"
-            active_edge = edge_over
             active_sim_prob = p_over
             active_decimal_odds = self._american_to_decimal(prop.over_odds)
         else:
             recommended_side = "under"
-            active_edge = edge_under
             active_sim_prob = p_under
             active_decimal_odds = self._american_to_decimal(prop.under_odds)
 
@@ -871,9 +868,9 @@ def _fmt_stat_type(stat_type: str) -> str:
 
 def _fmt_stat_type_short(stat_type: str) -> str:
     """
-    Return a very short abbreviation for Twitter formatting.
+    Convert a snake_case stat_type key to a very short label for Twitter.
 
-    Example: ``'pitcher_strikeouts'`` → ``'K``
+    Example: ``'pitcher_strikeouts'`` → ``'K'``
     """
     _short: dict[str, str] = {
         "pitcher_strikeouts": "K",
@@ -885,56 +882,32 @@ def _fmt_stat_type_short(stat_type: str) -> str:
         "batter_runs": "R",
         "batter_rbis": "RBI",
     }
-    return _short.get(stat_type, stat_type)
+    return _short.get(stat_type, stat_type[:4].upper())
 
 
 def _flatten_factors_to_strings(factors: dict) -> list[str]:
     """
-    Flatten the nested factors dict (as returned by MatchupModel.explain_prediction)
-    into a list of human-readable strings for display in the markdown report.
+    Flatten a nested factors dict into a list of human-readable strings.
 
-    Expected input structure (one level of nesting for adjustments):
-    ::
-
-        {
-          "strikeout": {
-            "park_factor": {"direction": "up", "magnitude": 0.01, "reason": "..."},
-            "umpire":      {"direction": "up", "magnitude": 0.02, "reason": "..."},
-            ...
-          }
-        }
-
-    Or a direct factor → adjustment dict if already flattened.
+    Parameters
+    ----------
+    factors:
+        The ``factors`` field from a :class:`PropAnalysis` object.
 
     Returns
     -------
     list[str]
-        E.g. ``["Umpire Angel Hernandez: +0.4K due to expanded zone", ...]``
+        Each element is a short factor summary, e.g.
+        ``"strikeouts: park_factor=+0.03, platoon=+0.02"``.
     """
     parts: list[str] = []
-    for outer_key, outer_val in factors.items():
-        if isinstance(outer_val, dict):
-            # Check if this is an adjustments sub-dict (has direction/magnitude/reason)
-            if "reason" in outer_val:
-                reason = str(outer_val.get("reason", ""))
-                magnitude = outer_val.get("magnitude", 0.0)
-                direction = outer_val.get("direction", "neutral")
-                if direction != "neutral" and abs(float(magnitude)) > 0.0005:
-                    parts.append(f"{reason}")
-            else:
-                # Nested: outer_key = outcome, outer_val = {factor: {reason...}}
-                for factor_name, factor_detail in outer_val.items():
-                    if isinstance(factor_detail, dict) and "reason" in factor_detail:
-                        reason = str(factor_detail.get("reason", ""))
-                        magnitude = factor_detail.get("magnitude", 0.0)
-                        direction = factor_detail.get("direction", "neutral")
-                        if direction != "neutral" and abs(float(magnitude)) > 0.0005:
-                            parts.append(f"{reason}")
-    # Deduplicate while preserving order
-    seen: set[str] = set()
-    unique: list[str] = []
-    for p in parts:
-        if p not in seen:
-            seen.add(p)
-            unique.append(p)
-    return unique
+    for outcome_name, adjustments in factors.items():
+        if isinstance(adjustments, dict):
+            adj_str = ", ".join(
+                f"{k}={v:+.3f}" if isinstance(v, float) else f"{k}={v}"
+                for k, v in adjustments.items()
+            )
+            parts.append(f"{outcome_name}: {adj_str}")
+        else:
+            parts.append(f"{outcome_name}: {adjustments}")
+    return parts
