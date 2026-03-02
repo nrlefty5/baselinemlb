@@ -1,16 +1,15 @@
 # .github/workflows/static.yml
-# Deploys the /dashboard folder to GitHub Pages
-# Injects SUPABASE_URL and SUPABASE_ANON_KEY into stats.js at build time
+# DEPRECATED: GitHub Pages dashboard retired in favor of Vercel-hosted site.
+# All dashboard functionality now lives at baselinemlb.vercel.app
+# This workflow is disabled. To fully remove, delete this file and the dashboard/ folder.
+#
+# Previously deployed /dashboard folder to GitHub Pages.
 
-name: Deploy Dashboard to GitHub Pages
+name: "[DEPRECATED] Deploy Dashboard to GitHub Pages"
 
+# Disabled - no triggers
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "dashboard/**"
-  workflow_dispatch:
+  workflow_dispatch:  # Manual only, for emergency rollback
 
 permissions:
   contents: read
@@ -23,6 +22,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Only runs on manual dispatch now
+    if: github.event_name == 'workflow_dispatch'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
