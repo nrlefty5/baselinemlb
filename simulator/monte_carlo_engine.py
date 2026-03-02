@@ -1310,6 +1310,10 @@ class GameMatchup:
         Multiplicative weather modifier (1.0 = neutral).
     umpire_k_factor:
         Multiplicative umpire strikeout tendency (1.0 = neutral).
+    catcher_framing_factor:
+        Multiplicative catcher framing modifier (1.0 = neutral).
+        Values > 1.0 mean elite framer (more called strikes / Ks),
+        values < 1.0 mean poor framer.
 
     Raises
     ------
@@ -1325,6 +1329,7 @@ class GameMatchup:
         park_factor: float = 1.0,
         weather_factor: float = 1.0,
         umpire_k_factor: float = 1.0,
+        catcher_framing_factor: float = 1.0,
     ) -> None:
         if len(lineup) != 9:
             raise ValueError(
@@ -1337,6 +1342,7 @@ class GameMatchup:
         self.park_factor = park_factor
         self.weather_factor = weather_factor
         self.umpire_k_factor = umpire_k_factor
+        self.catcher_framing_factor = catcher_framing_factor
 
 
 # ---------------------------------------------------------------------------
@@ -1589,8 +1595,9 @@ def _apply_pitcher_modifiers(
     park_factor: float,
     weather_factor: float,
     umpire_k_factor: float,
+    catcher_framing_factor: float = 1.0,
 ) -> np.ndarray:
-    """Apply pitcher / park / weather / umpire modifiers to a probability vector.
+    """Apply pitcher / park / weather / umpire / catcher modifiers to a probability vector.
 
     Parameters
     ----------
@@ -1604,6 +1611,8 @@ def _apply_pitcher_modifiers(
         Bullpen profile.
     park_factor, weather_factor, umpire_k_factor:
         Scalar multipliers.
+    catcher_framing_factor:
+        Multiplicative catcher framing modifier (1.0 = neutral).
 
     Returns
     -------
@@ -1620,7 +1629,7 @@ def _apply_pitcher_modifiers(
     )
 
     # --- Strikeout modifier ---
-    effective_k_mod = k_mod * umpire_k_factor
+    effective_k_mod = k_mod * umpire_k_factor * catcher_framing_factor
     probs[K_IDX] *= effective_k_mod
 
     # --- HR modifier (park + weather) ---
@@ -1716,6 +1725,7 @@ def _simulate_game_single(
                 park_factor=matchup.park_factor,
                 weather_factor=matchup.weather_factor,
                 umpire_k_factor=matchup.umpire_k_factor,
+                catcher_framing_factor=matchup.catcher_framing_factor,
             )
 
             # Draw outcome

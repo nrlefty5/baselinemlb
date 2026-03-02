@@ -23,14 +23,6 @@ Run with:
 from __future__ import annotations
 
 import json
-import sys
-import types
-import unittest
-from typing import Any
-from unittest.mock import MagicMock, patch
-
-import numpy as np
-import pytest
 
 # ---------------------------------------------------------------------------
 # Path / import helpers
@@ -40,13 +32,18 @@ import pytest
 #   lib/framing.py
 #   simulator/monte_carlo_engine.py
 #   pipeline/generate_projections.py
-
 # ---------------------------------------------------------------------------
 # ─── Import lib.framing ──────────────────────────────────────────────
 # ---------------------------------------------------------------------------
 # We patch os.environ so the Supabase URL validation in generate_projections
 # does not blow up during import.
 import os
+import sys
+from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pytest
+
 os.environ.setdefault("SUPABASE_URL", "https://placeholder.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-key")
 
@@ -57,26 +54,23 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from lib.framing import (  # noqa: E402
-    compute_umpire_k_factor,
+    MLB_AVG_COMPOSITE,
+    MLB_AVG_STRIKE_RATE,
+    compute_catcher_bb_factor,
     compute_catcher_k_factor,
     compute_umpire_bb_factor,
-    compute_catcher_bb_factor,
+    compute_umpire_k_factor,
     get_game_framing_adjustments,
-    MLB_AVG_STRIKE_RATE,
-    MLB_AVG_COMPOSITE,
 )
-
 from simulator.monte_carlo_engine import (  # noqa: E402
-    GameMatchup,
-    PitcherProfile,
     BatterProfile,
     BullpenProfile,
-    SimulationConfig,
+    GameMatchup,
+    PitcherProfile,
+    build_pitcher_profile_from_stats,
     simulate_game,
     simulate_game_with_pitcher_ks,
-    build_pitcher_profile_from_stats,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -589,7 +583,7 @@ class TestProjectionsNoDoubleCount:
         mock_catcher_data.return_value = catcher_data
 
         # Import here (after env vars are set)
-        from pipeline.generate_projections import project_pitcher, MLB_AVG_K_PCT
+        from pipeline.generate_projections import MLB_AVG_K_PCT, project_pitcher
 
         # Act
         projs = project_pitcher(
@@ -605,7 +599,7 @@ class TestProjectionsNoDoubleCount:
         features = json.loads(k_proj["features"])
 
         # Expected calculation (umpire applied ONCE)
-        from lib.framing import compute_umpire_k_factor, compute_catcher_k_factor
+        from lib.framing import compute_catcher_k_factor, compute_umpire_k_factor
         umpire_k = compute_umpire_k_factor(strike_rate)
         catcher_k = compute_catcher_k_factor(composite)
 
