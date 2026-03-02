@@ -164,3 +164,93 @@
 3. **Statcast model training** — train LightGBM on Statcast data before Opening Day (March 27)
 4. **Live accuracy dashboard** — wire frontend accuracy page to Supabase
 5. **Cautious linting** — never use `--unsafe-fixes` again; always verify cross-module imports before removing "unused" symbols
+
+---
+
+## Cycle #3 — 2026-03-02
+
+### Audited
+- Full codebase re-audit of all 53 Python files across 182 total files
+- Python import resolution for all modules (simulator/, simulation/, models/, pipeline/, scripts/, analysis/, lib/)
+- Ruff lint check: **0 errors** (pre-fix: 1 import sort error in `analysis/umpire_framing_model.py`)
+- Pytest execution: **244/244 passing (100%)** — zero regressions from Cycle #2
+- GitHub Actions workflow review: 8 workflow files, identified duplicate simulator workflows and broken script references
+- Makefile target validation: `simulate`, `refresh-data`, `backtest`, `test`, `lint` targets checked against actual file paths
+- TODO/FIXME/placeholder scan: 6 stubs in deprecated `analysis/projection_model.py`, intentional fallback stubs in `backtest_simulator.py` and `integration_test.py`
+- Supabase schema: 16 tables, RLS policies validated, no structural issues
+
+### Component Grades
+| Component | Cycle #2 Grade | Cycle #3 Grade | Delta |
+|-----------|---------------|---------------|-------|
+| Pipeline (pipeline/) | B+ | **A-** | ↑ |
+| Scripts (scripts/) | B- | **B** | ↑ |
+| Simulator (simulator/) | B | **B+** | ↑ |
+| Simulation (simulation/) | B+ | B+ | = |
+| Models (models/) | B | B | = |
+| Frontend (frontend/) | B+ | B+ | = |
+| GitHub Actions | B- | **A-** | ↑ |
+| Supabase Schema | A- | A- | = |
+| Documentation | A- | A- | = |
+| Tests | A | **A** | = |
+| Code Quality (Ruff) | A | **A** | = |
+| **Overall** | **B-** | **B+** | ↑ |
+
+### Fixed
+
+1. **Overnight pipeline crashes on missing `scripts/fetch_statcast.py`** (CRITICAL)
+   - Cycle #2 deleted `scripts/fetch_statcast.py` as a duplicate, but `pipelines.yml` overnight job still referenced it
+   - The Makefile `refresh-data` target also referenced the deleted script
+   - Fix: Updated `pipelines.yml` overnight job to use `python pipeline/fetch_statcast.py`
+   - Fix: Updated Makefile `refresh-data` target to use `pipeline/fetch_statcast.py`
+   - Impact: Overnight pipeline (Statcast ingest + grading) unblocked
+
+2. **`pipeline/fetch_statcast.py` crashes on import without env vars** (HIGH)
+   - Module-level Supabase client init caused `EnvironmentError` on import in any context without `.env` file
+   - Other pipeline scripts use `lib/supabase.py` with lazy init; this script was the only one with eager module-level init
+   - Fix: Refactored to use `_get_supabase_client()` lazy initialization function, added proper logging, docstring
+   - Impact: Script can now be imported/compiled without crashing; Supabase client only created when actually upserting
+
+3. **Duplicate simulator workflows** (MEDIUM)
+   - `simulator.yml` and `daily_simulation.yml` both scheduled daily Monte Carlo simulation jobs
+   - `simulator.yml` used the proper `simulator.run_daily` module; `daily_simulation.yml` had an inline Poisson-based Python script
+   - The two ran at different times (15:00 UTC vs 14:00 UTC) with different configs (3K vs 10K sims)
+   - Fix: Consolidated into one `simulator.yml` that uses the proper simulator package, added Vercel redeploy trigger and artifact upload from `daily_simulation.yml`, added concurrency group. Removed `daily_simulation.yml`.
+   - Impact: Single source of truth for simulation workflow; eliminates duplicate runs and confusion
+
+4. **Last lint error fixed** (LOW)
+   - `analysis/umpire_framing_model.py` had unsorted imports (I001)
+   - Fix: Applied `ruff --fix` for import sort
+   - Impact: **0 lint errors** across entire codebase
+
+### Improved
+
+1. **Makefile `simulate` target now includes Monte Carlo engine**
+   - Previously only ran point-estimate projections (pipeline scripts)
+   - Now also invokes `python -m simulator.run_daily --n-sims $(NUM_SIMS)` with graceful fallback
+   - `make simulate` runs the full pipeline: data fetch → point estimates → Monte Carlo simulation
+   - Uses `NUM_SIMS` variable (default 10000, configurable: `make simulate NUM_SIMS=3000`)
+
+### Commits
+1. `fix: update pipelines.yml overnight job to use pipeline/fetch_statcast.py (was referencing deleted scripts/fetch_statcast.py)`
+2. `fix: update Makefile refresh-data to use pipeline/fetch_statcast.py`
+3. `refactor: pipeline/fetch_statcast.py — lazy Supabase init, add logging`
+4. `fix: consolidate simulator workflows — remove daily_simulation.yml, enhance simulator.yml`
+5. `fix: sort imports in analysis/umpire_framing_model.py (last lint error)`
+6. `feat: Makefile simulate target now invokes Monte Carlo engine`
+7. `docs: update IMPROVEMENT_BACKLOG.md for Cycle #3`
+8. `docs: append Cycle #3 improvement log entry`
+
+### Still Pending
+1. Consolidate `simulation/` and `simulator/` into one canonical package (highest tech debt)
+2. Train LightGBM model on Statcast data before Opening Day (March 27)
+3. Wire accuracy dashboard to live Supabase data
+4. Add integration test for full `make simulate` pipeline with mocked APIs
+5. Remove or archive deprecated `analysis/projection_model.py`
+6. Wire newsletter + Twitter automation into GitHub Actions
+7. Expand backtest to full 2025 season
+
+### Next Cycle Should Focus On
+1. **Simulation package consolidation** — merge `simulation/` and `simulator/` into one canonical package. This is the #1 tech debt item, carried over from Cycle #1.
+2. **LightGBM training** — critical path item before Opening Day (March 27). Fetch Statcast data, build training dataset, train model.
+3. **Live accuracy dashboard** — wire frontend to Supabase `accuracy_summary` table for real-time accuracy tracking.
+4. **Integration test** — end-to-end test for `make simulate` with mocked external APIs.
