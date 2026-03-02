@@ -29,20 +29,16 @@ import argparse
 import json
 import logging
 import os
-import sys
-import time
 from datetime import date, datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import requests
 
 try:
-    from models.matchup_model import ALL_FEATURES, OUTCOME_CLASSES, MatchupModel
+    from models.matchup_model import OUTCOME_CLASSES, MatchupModel  # noqa: F401
 except ImportError:
-    from matchup_model import ALL_FEATURES, OUTCOME_CLASSES, MatchupModel
+    from matchup_model import OUTCOME_CLASSES, MatchupModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
