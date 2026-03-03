@@ -860,7 +860,7 @@ class GameSimulator:
         self.config = config
 
         # Pull commonly used config values once
-        self._num_sims: int = getattr(config, "num_simulations", 2500)
+        self._num_sims: int = getattr(config, "NUM_SIMULATIONS", 2500)
         self._pc_mean: float = getattr(config, "pitcher_pc_mean", DEFAULT_PC_MEAN)
         self._pc_std: float = getattr(config, "pitcher_pc_std", DEFAULT_PC_STD)
         self._gdp_rate: float = getattr(config, "gdp_rate", DEFAULT_GDP_RATE)
