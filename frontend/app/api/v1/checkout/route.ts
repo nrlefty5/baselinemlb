@@ -6,9 +6,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2025-01-27.acacia' as any,
-})
+// Lazy-init Stripe to avoid build-time crash
+let _stripe: Stripe | null = null
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY
+    if (!key) throw new Error('STRIPE_SECRET_KEY is not configured')
+    _stripe = new Stripe(key, { apiVersion: '2025-01-27.acacia' as any })
+  }
+  return _stripe
+}
 
 const PRICE_IDS: Record<string, string> = {
   pro: process.env.STRIPE_PRICE_PRO || '',
@@ -35,6 +42,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const stripe = getStripe()
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       payment_method_types: ['card'],
