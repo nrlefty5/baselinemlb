@@ -8,9 +8,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-  apiVersion: '2025-01-27.acacia' as any,
-})
+// Lazy-init Stripe to avoid build-time crash when env vars are missing
+let _stripe: Stripe | null = null
+function getStripe(): Stripe {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY
+    if (!key) {
+      throw new Error('STRIPE_SECRET_KEY is not configured')
+    }
+    _stripe = new Stripe(key, {
+      apiVersion: '2025-01-27.acacia' as any,
+    })
+  }
+  return _stripe
+}
 
 const PRICE_IDS: Record<string, string> = {
   pro_monthly: process.env.STRIPE_PRO_MONTHLY_PRICE_ID || '',
@@ -22,7 +33,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { plan, access_token } = body
 
-    // ── Validate plan ────────────────────────────────────────────
+    // -- Validate plan
     if (!plan || !['pro_monthly', 'pro_annual'].includes(plan)) {
       return NextResponse.json(
         { error: 'Invalid plan. Must be pro_monthly or pro_annual.', code: 'INVALID_PLAN' },
@@ -38,7 +49,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Authenticate via Supabase ────────────────────────────────
+    // -- Authenticate via Supabase
     if (!access_token) {
       return NextResponse.json(
         { error: 'Authentication required. Please sign in.', code: 'AUTH_REQUIRED' },
@@ -53,7 +64,6 @@ export async function POST(req: NextRequest) {
     )
 
     const { data: { user }, error: authError } = await supabase.auth.getUser()
-
     if (authError || !user) {
       return NextResponse.json(
         { error: 'Invalid session. Please sign in again.', code: 'INVALID_SESSION' },
@@ -61,15 +71,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── Check for existing Stripe customer ───────────────────────
+    // -- Check for existing Stripe customer
     const existingCustomerId = (user as any).user_metadata?.stripe_customer_id
     let customerId: string | undefined
-
     if (existingCustomerId) {
       customerId = existingCustomerId
     }
 
-    // ── Create Checkout Session ──────────────────────────────────
+    // -- Create Checkout Session
+    const stripe = getStripe()
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://baselinemlb.vercel.app'
 
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
