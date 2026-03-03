@@ -1,0 +1,9 @@
+tree
+version=v4
+num_class=8
+num_tree_per_iteration=8
+label_index=0
+max_feature_idx=39
+objective=multiclass num_class:8
+feature_names=p_avg_velo p_swstr_pct p_csw_pct p_zone_pct p_k_pct p_bb_pct p_pct_fastball p_pct_slider p_pct_curve p_pct_change p_pct_cutter p_whiff_fastball p_whiff_slider p_whiff_curve p_whiff_change p_whiff_cutter p_gb_rate p_fb_rate p_ld_rate b_k_pct b_bb_pct b_xba b_xslg b_avg_ev b_hard_hit_pct b_chase_rate b_whiff_pct b_barrel_pct p_throws_L b_stands_L platoon_same platoon_opposite park_factor_hr park_factor_hit temp_f wind_mph wind_out umpire_k_delta umpire_bb_delta score_diff
+feature_infos=[53.083332061767578:98.348236083984375] [0:0.24637681245803833] [0.075000002980232239:0.5] [0:0.76923078298568726] [0:1] [0:0.5] [0:1] [0:0.90736043453216553] [0:0.66888046264648438] [0:0.83246076107025146] [0:0.79434448480606079] [0:0.5] [0:1] [0:1] [0:1] [0:1] [0:1] [0:0.69999998807907104] [0:0.66666668653488159] [0:1] [0:0.5] [0.053199999034404755:0.70999997854232788] [0.062399998307228088:1.2972475290298462] [25.100000381469727:99.699996948242188] [0:1] [0:0.83333331346511841] [0:1] none [0:1] [0:1] [0:1] [0:1] none none none none none none none none
