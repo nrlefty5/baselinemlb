@@ -62,15 +62,7 @@ MODEL_VERSION = "v2.1-glass-box"
 if not SUPABASE_URL.startswith("https://") or not SUPABASE_URL.endswith(".supabase.co"):
     raise RuntimeError(f"Invalid SUPABASE_URL (length={len(SUPABASE_URL)}, repr={repr(SUPABASE_URL[:30])})")
 
-PARK_K_FACTORS = {
-    "Coors Field": -8, "Yankee Stadium": 3, "Oracle Park": 5,
-    "Petco Park": 4, "Truist Park": 2, "Globe Life Field": 2,
-    "Chase Field": 1, "T-Mobile Park": 3, "Guaranteed Rate Field": 0,
-    "loanDepot park": 1, "Great American Ball Park": -2,
-    "PNC Park": 1, "Minute Maid Park": 2, "Dodger Stadium": 4,
-    "Angel Stadium": 0, "Fenway Park": -1, "Wrigley Field": -3,
-    "Busch Stadium": 1, "Citizens Bank Park": -2,
-}
+from pipeline.park_factors import PARK_K_FACTORS  # noqa: E402 — single source of truth
 
 # MLB average constants for fallbacks
 MLB_AVG_K9 = 8.5        # 2024 MLB average K/9

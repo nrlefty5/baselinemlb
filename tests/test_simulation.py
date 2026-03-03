@@ -1016,7 +1016,6 @@ class TestGameSimulator:
 
     def _run_single_game_helper(self, seed: int = 0):
         """Helper to call _run_single_game with all required args."""
-        from collections import defaultdict
         rng = np.random.default_rng(seed=seed)
         player_stats = {}
         for p in self.away_lineup + self.home_lineup:

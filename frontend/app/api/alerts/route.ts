@@ -102,127 +102,136 @@ interface EdgeRow {
 
 // ── Main handler ────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  // Authorize cron
-  if (!isCronAuthorized(req)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  try {
+    // Authorize cron
+    if (!isCronAuthorized(req)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
-  if (!RESEND_API_KEY) {
-    return NextResponse.json(
-      { error: 'RESEND_API_KEY not configured', skipped: true },
-      { status: 200 }
-    )
-  }
+    if (!RESEND_API_KEY) {
+      return NextResponse.json(
+        { error: 'RESEND_API_KEY not configured', skipped: true },
+        { status: 200 }
+      )
+    }
 
-  const supabase = getServiceClient()
-  const today = new Date().toISOString().split('T')[0]
+    const supabase = getServiceClient()
+    const today = new Date().toISOString().split('T')[0]
 
-  // 1. Fetch today's published edges
-  const { data: edges, error: edgesError } = await supabase
-    .from('picks')
-    .select('player_name, stat_type, line, projection, edge, direction, grade')
-    .eq('game_date', today)
-    .eq('published', true)
-    .order('edge', { ascending: false })
-    .limit(20)
+    // 1. Fetch today's published edges
+    const { data: edges, error: edgesError } = await supabase
+      .from('picks')
+      .select('player_name, stat_type, line, projection, edge, direction, grade')
+      .eq('game_date', today)
+      .eq('published', true)
+      .order('edge', { ascending: false })
+      .limit(20)
 
-  if (edgesError || !edges || edges.length === 0) {
-    return NextResponse.json({
-      message: 'No edges found for today',
-      date: today,
-      sent: 0,
-    })
-  }
-
-  // 2. Fetch active pro/premium subscribers with email alerts enabled
-  const { data: subscribers, error: subError } = await supabase
-    .from('subscriptions')
-    .select('email, tier')
-    .in('tier', ['pro', 'premium'])
-    .eq('status', 'active')
-
-  if (subError || !subscribers || subscribers.length === 0) {
-    return NextResponse.json({
-      message: 'No eligible subscribers',
-      date: today,
-      sent: 0,
-    })
-  }
-
-  // 3. Check alert preferences
-  const { data: prefs } = await supabase
-    .from('alert_preferences')
-    .select('email, enabled')
-    .in('email', subscribers.map(s => s.email))
-    .eq('enabled', true)
-
-  const enabledEmails = new Set((prefs || []).map(p => p.email))
-  // Default: pro/premium subscribers get alerts unless they opted out
-  const recipientEmails = subscribers
-    .map(s => s.email)
-    .filter(email => !prefs || enabledEmails.has(email) || !(prefs.map(p => p.email).includes(email)))
-
-  if (recipientEmails.length === 0) {
-    return NextResponse.json({ message: 'All subscribers have opted out', sent: 0 })
-  }
-
-  // 4. Build email
-  const subject = `⚾ BaselineMLB Edges — ${today} (${edges.length} picks)`
-  const html = buildEmailHtml(edges as EdgeRow[], today)
-
-  // 5. Send via Resend (batch)
-  let sent = 0
-  let failed = 0
-  const batchSize = 100
-
-  for (let i = 0; i < recipientEmails.length; i += batchSize) {
-    const batch = recipientEmails.slice(i, i + batchSize)
-    try {
-      const res = await fetch('https://api.resend.com/emails/batch', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(
-          batch.map(email => ({
-            from: FROM_EMAIL,
-            to: email,
-            subject,
-            html: html.replace('{{unsubscribe_url}}', `${process.env.NEXT_PUBLIC_APP_URL}/api/unsubscribe?email=${encodeURIComponent(email)}`),
-          }))
-        ),
+    if (edgesError || !edges || edges.length === 0) {
+      return NextResponse.json({
+        message: 'No edges found for today',
+        date: today,
+        sent: 0,
       })
+    }
 
-      if (res.ok) {
-        sent += batch.length
-      } else {
-        const errBody = await res.text()
-        console.error(`Resend batch error (${res.status}):`, errBody)
+    // 2. Fetch active pro/premium subscribers with email alerts enabled
+    const { data: subscribers, error: subError } = await supabase
+      .from('subscriptions')
+      .select('email, tier')
+      .in('tier', ['pro', 'premium'])
+      .eq('status', 'active')
+
+    if (subError || !subscribers || subscribers.length === 0) {
+      return NextResponse.json({
+        message: 'No eligible subscribers',
+        date: today,
+        sent: 0,
+      })
+    }
+
+    // 3. Check alert preferences
+    const { data: prefs } = await supabase
+      .from('alert_preferences')
+      .select('email, enabled')
+      .in('email', subscribers.map(s => s.email))
+      .eq('enabled', true)
+
+    const enabledEmails = new Set((prefs || []).map(p => p.email))
+    // Default: pro/premium subscribers get alerts unless they opted out
+    const recipientEmails = subscribers
+      .map(s => s.email)
+      .filter(email => !prefs || enabledEmails.has(email) || !(prefs.map(p => p.email).includes(email)))
+
+    if (recipientEmails.length === 0) {
+      return NextResponse.json({ message: 'All subscribers have opted out', sent: 0 })
+    }
+
+    // 4. Build email
+    const subject = `⚾ BaselineMLB Edges — ${today} (${edges.length} picks)`
+    const html = buildEmailHtml(edges as EdgeRow[], today)
+
+    // 5. Send via Resend (batch)
+    let sent = 0
+    let failed = 0
+    const batchSize = 100
+
+    for (let i = 0; i < recipientEmails.length; i += batchSize) {
+      const batch = recipientEmails.slice(i, i + batchSize)
+      try {
+        const res = await fetch('https://api.resend.com/emails/batch', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${RESEND_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            batch.map(email => ({
+              from: FROM_EMAIL,
+              to: email,
+              subject,
+              html: html.replace('{{unsubscribe_url}}', `${process.env.NEXT_PUBLIC_APP_URL}/api/unsubscribe?email=${encodeURIComponent(email)}`),
+            }))
+          ),
+        })
+
+        if (res.ok) {
+          sent += batch.length
+        } else {
+          const errBody = await res.text()
+          console.error(`Resend batch error (${res.status}):`, errBody)
+          failed += batch.length
+        }
+      } catch (err) {
+        console.error('Resend fetch error:', err)
         failed += batch.length
       }
-    } catch (err) {
-      console.error('Resend fetch error:', err)
-      failed += batch.length
     }
+
+    // 6. Record digest in newsletter_digests table
+    const { error: insertErr } = await supabase.from('newsletter_digests').insert({
+      game_date: today,
+      subject,
+      edges_json: edges,
+      sent_at: new Date().toISOString(),
+      recipient_count: sent,
+    })
+    if (insertErr) console.error('Failed to record digest:', insertErr)
+
+    return NextResponse.json({
+      message: 'Digest sent',
+      date: today,
+      edges_count: edges.length,
+      sent,
+      failed,
+      recipients: recipientEmails.length,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error'
+    console.error('[Alerts]', message)
+    return NextResponse.json(
+      { error: 'Failed to send alerts', detail: message },
+      { status: 500 }
+    )
   }
-
-  // 6. Record digest in newsletter_digests table
-  const { error: insertErr } = await supabase.from('newsletter_digests').insert({
-    game_date: today,
-    subject,
-    edges_json: edges,
-    sent_at: new Date().toISOString(),
-    recipient_count: sent,
-  })
-  if (insertErr) console.error('Failed to record digest:', insertErr)
-
-  return NextResponse.json({
-    message: 'Digest sent',
-    date: today,
-    edges_count: edges.length,
-    sent,
-    failed,
-    recipients: recipientEmails.length,
-  })
 }

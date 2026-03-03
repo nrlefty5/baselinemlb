@@ -78,12 +78,12 @@ Open `.env` in any text editor and fill in these values:
 
 ```env
 # Supabase — your production database
-SUPABASE_URL=https://kjhglcfwuxfkpxbbtlrs.supabase.co
-SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqaGdsY2Z3dXhma3B4YmJ0bHJzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwNTgxNTgsImV4cCI6MjA4NzYzNDE1OH0.MCr87d5hGGdKnCLIQdAJELdlDodFI6CjtFoM7tKzsO4
+SUPABASE_URL=<YOUR_SUPABASE_PROJECT_URL>
+SUPABASE_ANON_KEY=<YOUR_SUPABASE_ANON_KEY>
 SUPABASE_SERVICE_KEY=<GET THIS FROM SUPABASE DASHBOARD — see instructions below>
 
 # The Odds API — prop lines and odds data
-ODDS_API_KEY=fc90a2f6584d919654bd609185643c55
+ODDS_API_KEY=<YOUR_ODDS_API_KEY>
 
 # OpenWeatherMap — game-time weather (sign up if you haven't)
 WEATHER_API_KEY=<YOUR KEY — sign up at https://openweathermap.org/api>

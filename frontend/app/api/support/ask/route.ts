@@ -41,7 +41,6 @@ export async function POST(req: NextRequest) {
     const supabase = getSupabase();
 
     // Build context from Supabase if prop/player context provided
-    const supabase = getSupabase();
 
     let ragContext = '';
     if (context?.prop_id) {
