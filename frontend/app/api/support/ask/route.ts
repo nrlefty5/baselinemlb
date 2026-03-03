@@ -3,14 +3,21 @@
 // POST /api/support/ask
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { routeAndCallAI } from '@/lib/ai';
 import type { TaskDescriptor } from '@/lib/ai';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+let _supabase: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+  }
+  return _supabase;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,6 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     // Build context from Supabase if prop/player context provided
+    const supabase = getSupabase();
+
     let ragContext = '';
     if (context?.prop_id) {
       const { data: prop } = await supabase
