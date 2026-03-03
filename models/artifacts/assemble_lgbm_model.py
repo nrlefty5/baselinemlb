@@ -17,7 +17,6 @@ After running, lgbm_matchup_model.txt will be present in models/artifacts/.
 
 from pathlib import Path
 
-
 CHUNKS_DIR = Path(__file__).parent / "chunks"
 OUTPUT_FILE = Path(__file__).parent / "lgbm_matchup_model.txt"
 NUM_CHUNKS = 20
