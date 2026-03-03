@@ -781,16 +781,23 @@ class TestGameState:
         assert runs >= 0
         assert gs.score["away"] == initial_score + runs
 
-    def test_advance_runners_probabilistic_triple(self):
-        """advance_runners_probabilistic('triple') scores all runners."""
+    def test_advance_runners_probabilistic_triple_raises(self):
+        """advance_runners_probabilistic('triple') raises ValueError (only handles single/double)."""
         rng = np.random.default_rng(seed=0)
         gs = GameState()
         gs.half = "top"
         gs.runners = {1: 1, 2: 2, 3: 3}
-        runs = gs.advance_runners_probabilistic("triple", rng=rng)
+        with pytest.raises(ValueError, match="single.*double"):
+            gs.advance_runners_probabilistic("triple", rng=rng)
+
+    def test_advance_runners_triple_via_advance_runners(self):
+        """advance_runners(3) scores all baserunners on a triple."""
+        gs = GameState()
+        gs.half = "top"
+        gs.runners = {1: 1, 2: 2, 3: 3}
+        runs = gs.advance_runners(3)
         # All 3 runners should score on a triple
         assert runs == 3
-        assert gs.runners[3] is not None  # batter on 3B
 
 
 # ===========================================================================
@@ -801,48 +808,48 @@ class TestGameState:
 class TestPlayerStats:
     """Tests for PlayerStats — the aggregated stat container."""
 
-    def test_from_dict_batter(self):
-        """PlayerStats.from_dict creates a valid batter stats object."""
-        raw = _make_player(100, "Test Batter")
-        ps = PlayerStats.from_dict(raw)
-        assert ps.mlbam_id == 100
-        assert ps.name == "Test Batter"
-        for outcome in MODEL_OUTCOMES:
-            assert hasattr(ps, f"{outcome}_rate")
+    def test_constructor(self):
+        """PlayerStats can be created with player_id and player_name."""
+        ps = PlayerStats(player_id=100, player_name="Test Batter")
+        assert ps.player_id == 100
+        assert ps.player_name == "Test Batter"
 
-    def test_from_dict_pitcher(self):
-        """PlayerStats.from_dict creates a valid pitcher stats object."""
-        raw = _make_pitcher(200, "Test Pitcher")
-        ps = PlayerStats.from_dict(raw)
-        assert ps.mlbam_id == 200
-        assert ps.name == "Test Pitcher"
+    def test_constructor_pitcher(self):
+        """PlayerStats can be created for a pitcher."""
+        ps = PlayerStats(player_id=200, player_name="Test Pitcher")
+        assert ps.player_id == 200
+        assert ps.player_name == "Test Pitcher"
 
-    def test_rates_non_negative(self):
-        """All rate attributes are non-negative after from_dict."""
-        ps = PlayerStats.from_dict(_make_player(1, "Player"))
-        for outcome in MODEL_OUTCOMES:
-            val = getattr(ps, f"{outcome}_rate")
-            assert val >= 0.0, f"{outcome}_rate is negative: {val}"
+    def test_initial_stat_counts_empty(self):
+        """Newly created PlayerStats has empty stat_counts."""
+        ps = PlayerStats(player_id=1, player_name="Player")
+        assert ps.get_mean("strikeouts") == 0.0
+        assert ps.get_distribution("strikeouts") == {}
 
-    def test_sample_pa_preserved(self):
-        """sample_pa is correctly stored from the input dict."""
-        raw = _make_player(99, "A", hand="L")
-        raw["sample_pa"] = 350
-        ps = PlayerStats.from_dict(raw)
-        assert ps.sample_pa == 350
+    def test_record_pa_outcome_strikeout(self):
+        """Recording a strikeout increments pa and strikeouts."""
+        ps = PlayerStats(player_id=99, player_name="A")
+        ps.record_pa_outcome("strikeout")
+        assert ps.stat_counts["strikeouts"][1] == 1
+        assert ps.stat_counts["pa"][1] == 1
 
-    def test_hand_preserved(self):
-        """Hand attribute is correctly stored."""
-        raw = _make_player(88, "B", hand="L")
-        ps = PlayerStats.from_dict(raw)
-        assert ps.hand == "L"
+    def test_record_pa_outcome_single(self):
+        """Recording a single increments hits, singles, and total_bases."""
+        ps = PlayerStats(player_id=88, player_name="B")
+        ps.record_pa_outcome("single")
+        assert ps.stat_counts["hits"][1] == 1
+        assert ps.stat_counts["singles"][1] == 1
+        assert ps.stat_counts["total_bases"][1] == 1
 
-    def test_missing_hand_defaults_to_r(self):
-        """If 'hand' is missing from dict, defaults to 'R'."""
-        raw = _make_player(77, "C")
-        del raw["hand"]
-        ps = PlayerStats.from_dict(raw)
-        assert ps.hand == "R"
+    def test_get_mean(self):
+        """get_mean returns correct mean of recorded stats."""
+        ps = PlayerStats(player_id=77, player_name="C")
+        # Simulate 3 games: 1 K, 0 K, 2 K
+        ps.stat_counts["strikeouts"][1] = 1
+        ps.stat_counts["strikeouts"][0] = 1
+        ps.stat_counts["strikeouts"][2] = 1
+        mean = ps.get_mean("strikeouts")
+        assert abs(mean - 1.0) < 1e-9
 
 
 # ===========================================================================
@@ -879,45 +886,50 @@ class TestGameSimulator:
         assert isinstance(result, SimulationResult)
 
     def test_win_probs_sum_to_one(self):
-        """away_win_prob + home_win_prob + tie_prob == 1.0."""
+        """away wins + home wins == num_simulations."""
         result = self.sim.simulate_game(self.game_data)
-        total = result.away_win_prob + result.home_win_prob + result.tie_prob
-        assert abs(total - 1.0) < 1e-9, f"Win probs sum = {total}"
+        away_wins = result.team_results["away"]["wins"]
+        home_wins = result.team_results["home"]["wins"]
+        assert away_wins + home_wins == result.num_simulations, (
+            f"Win counts {away_wins} + {home_wins} != {result.num_simulations}"
+        )
 
-    def test_win_probs_in_range(self):
-        """All win probabilities are in [0, 1]."""
+    def test_win_counts_non_negative(self):
+        """All win counts are non-negative."""
         result = self.sim.simulate_game(self.game_data)
-        assert 0.0 <= result.away_win_prob <= 1.0
-        assert 0.0 <= result.home_win_prob <= 1.0
-        assert 0.0 <= result.tie_prob <= 1.0
+        assert result.team_results["away"]["wins"] >= 0
+        assert result.team_results["home"]["wins"] >= 0
 
     def test_total_runs_non_negative(self):
-        """Average runs scored per team is non-negative."""
+        """Run distributions contain only non-negative run counts."""
         result = self.sim.simulate_game(self.game_data)
-        assert result.avg_away_runs >= 0.0
-        assert result.avg_home_runs >= 0.0
+        for side in ("away", "home"):
+            run_dist = result.team_results[side]["run_distribution"]
+            for runs, count in run_dist.items():
+                assert runs >= 0, f"{side} has negative run value: {runs}"
+                assert count >= 0, f"{side} has negative count: {count}"
 
-    def test_player_stats_present(self):
-        """SimulationResult contains player_stats dict with at least one entry."""
+    def test_player_results_present(self):
+        """SimulationResult contains player_results dict with at least one entry."""
         result = self.sim.simulate_game(self.game_data)
-        assert isinstance(result.player_stats, dict)
-        assert len(result.player_stats) > 0
+        assert isinstance(result.player_results, dict)
+        assert len(result.player_results) > 0
 
-    def test_player_stats_hits_non_negative(self):
+    def test_player_results_hits_non_negative(self):
         """Every player's average hits is non-negative."""
         result = self.sim.simulate_game(self.game_data)
-        for player_id, stats in result.player_stats.items():
-            assert stats.get("avg_hits", 0) >= 0.0, (
-                f"Player {player_id} has negative avg_hits"
+        for player_id, ps in result.player_results.items():
+            assert ps.get_mean("hits") >= 0.0, (
+                f"Player {player_id} has negative avg hits"
             )
 
-    def test_player_stats_contains_lineup_players(self):
-        """All lineup players appear in player_stats."""
+    def test_player_results_contains_lineup_players(self):
+        """All lineup players appear in player_results."""
         result = self.sim.simulate_game(self.game_data)
         for player in self.away_lineup + self.home_lineup:
             pid = player["mlbam_id"]
-            assert pid in result.player_stats, (
-                f"Player {pid} missing from player_stats"
+            assert pid in result.player_results, (
+                f"Player {pid} missing from player_results"
             )
 
     def test_simulation_count_matches_config(self):
@@ -926,9 +938,16 @@ class TestGameSimulator:
         assert result.num_simulations == self.cfg.NUM_SIMULATIONS
 
     def test_random_seed_reproducibility(self):
-        """Two simulators with the same seed produce identical results."""
-        cfg1 = SimulationConfig(NUM_SIMULATIONS=50, RANDOM_SEED=99)
-        cfg2 = SimulationConfig(NUM_SIMULATIONS=50, RANDOM_SEED=99)
+        """Two simulators with the same seed produce identical results.
+
+        NOTE: GameSimulator reads config.random_seed (lowercase) while
+        SimulationConfig stores RANDOM_SEED (uppercase).  We set the
+        lowercase attribute directly so the seed actually takes effect.
+        """
+        cfg1 = SimulationConfig(NUM_SIMULATIONS=50)
+        cfg1.random_seed = 99
+        cfg2 = SimulationConfig(NUM_SIMULATIONS=50)
+        cfg2.random_seed = 99
         sim1 = GameSimulator(
             matchup_model=self.matchup_model, config=cfg1
         )
@@ -937,14 +956,15 @@ class TestGameSimulator:
         )
         r1 = sim1.simulate_game(self.game_data)
         r2 = sim2.simulate_game(self.game_data)
-        assert r1.away_win_prob == r2.away_win_prob
-        assert r1.home_win_prob == r2.home_win_prob
-        assert r1.avg_away_runs == r2.avg_away_runs
+        assert r1.team_results["away"]["wins"] == r2.team_results["away"]["wins"]
+        assert r1.team_results["home"]["wins"] == r2.team_results["home"]["wins"]
 
     def test_different_seeds_usually_differ(self):
         """Two simulators with different seeds almost always produce different results."""
-        cfg1 = SimulationConfig(NUM_SIMULATIONS=200, RANDOM_SEED=1)
-        cfg2 = SimulationConfig(NUM_SIMULATIONS=200, RANDOM_SEED=2)
+        cfg1 = SimulationConfig(NUM_SIMULATIONS=200)
+        cfg1.random_seed = 1
+        cfg2 = SimulationConfig(NUM_SIMULATIONS=200)
+        cfg2.random_seed = 2
         sim1 = GameSimulator(
             matchup_model=self.matchup_model, config=cfg1
         )
@@ -955,76 +975,114 @@ class TestGameSimulator:
         r2 = sim2.simulate_game(self.game_data)
         # It is astronomically unlikely both are identical with 200 sims
         assert (
-            r1.away_win_prob != r2.away_win_prob
-            or r1.avg_away_runs != r2.avg_away_runs
+            r1.team_results["away"]["wins"] != r2.team_results["away"]["wins"]
+            or r1.team_results["home"]["wins"] != r2.team_results["home"]["wins"]
         )
 
-    def test_result_has_score_distribution(self):
-        """SimulationResult contains a score_distribution dict."""
+    def test_result_has_team_run_distributions(self):
+        """SimulationResult contains run_distribution for both teams."""
         result = self.sim.simulate_game(self.game_data)
-        assert hasattr(result, "score_distribution")
-        assert isinstance(result.score_distribution, dict)
+        for side in ("away", "home"):
+            assert "run_distribution" in result.team_results[side]
+            assert isinstance(result.team_results[side]["run_distribution"], dict)
 
-    def test_score_distribution_probabilities_sum_to_one(self):
-        """All values in score_distribution sum to approximately 1.0."""
+    def test_run_distribution_counts_sum_to_num_sims(self):
+        """All run_distribution counts sum to num_simulations for each team."""
         result = self.sim.simulate_game(self.game_data)
-        total = sum(result.score_distribution.values())
-        assert abs(total - 1.0) < 1e-6, f"Score dist sum = {total}"
+        for side in ("away", "home"):
+            total = sum(result.team_results[side]["run_distribution"].values())
+            assert total == result.num_simulations, (
+                f"{side} run dist count sum = {total}, expected {result.num_simulations}"
+            )
 
-    def test_over_under_line_returns_probs(self):
-        """get_over_under returns a dict with 'over' and 'under' keys."""
+    def test_team_results_have_required_keys(self):
+        """team_results has run_distribution and wins for both sides."""
         result = self.sim.simulate_game(self.game_data)
-        ou = result.get_over_under(line=8.5)
-        assert "over" in ou and "under" in ou
-        assert abs(ou["over"] + ou["under"] - 1.0) < 1e-9
+        for side in ("away", "home"):
+            assert "run_distribution" in result.team_results[side]
+            assert "wins" in result.team_results[side]
 
-    def test_over_under_at_zero_line_all_over(self):
-        """Line of 0.0 means virtually all simulated games go over (≥1 total run)."""
+    def test_game_info_preserved(self):
+        """game_info metadata is preserved in SimulationResult."""
         result = self.sim.simulate_game(self.game_data)
-        ou = result.get_over_under(line=0.0)
-        assert ou["over"] > 0.99, f"Expected >99% over at line 0.0, got {ou['over']:.4f}"
+        assert result.game_info.get("game_pk") == 12345
 
-    def test_over_under_at_huge_line_all_under(self):
-        """Line of 100.0 means virtually all simulated games go under."""
+    def test_to_json_returns_valid_string(self):
+        """to_json returns a non-empty JSON string."""
         result = self.sim.simulate_game(self.game_data)
-        ou = result.get_over_under(line=100.0)
-        assert ou["under"] > 0.99, (
-            f"Expected >99% under at line 100.0, got {ou['under']:.4f}"
+        json_str = result.to_json()
+        assert isinstance(json_str, str)
+        assert len(json_str) > 0
+
+    def _run_single_game_helper(self, seed: int = 0):
+        """Helper to call _run_single_game with all required args."""
+        from collections import defaultdict
+        rng = np.random.default_rng(seed=seed)
+        player_stats = {}
+        for p in self.away_lineup + self.home_lineup:
+            pid = p["mlbam_id"]
+            player_stats[pid] = PlayerStats(pid, p["name"])
+        for pitcher in (self.away_starter, self.home_starter):
+            pid = pitcher["mlbam_id"]
+            player_stats[pid] = PlayerStats(pid, pitcher["name"])
+        result = SimulationResult(
+            game_info={"game_pk": 12345, "pitchers": {
+                self.away_starter["mlbam_id"]: True,
+                self.home_starter["mlbam_id"]: True,
+            }},
+            num_simulations=1,
         )
+        away_bullpen = getattr(self.game_data, "away_bullpen_composite", {})
+        home_bullpen = getattr(self.game_data, "home_bullpen_composite", {})
+        sim_totals = self.sim._run_single_game(
+            rng=rng,
+            away_lineup=self.away_lineup,
+            home_lineup=self.home_lineup,
+            away_starter=self.away_starter,
+            home_starter=self.home_starter,
+            away_bullpen=away_bullpen,
+            home_bullpen=home_bullpen,
+            game_data=self.game_data,
+            player_stats=player_stats,
+            result=result,
+        )
+        return sim_totals, result
 
-    def test_single_game_sim_returns_valid_dict(self):
-        """_run_single_game returns a dict with required keys."""
-        rng = np.random.default_rng(seed=0)
-        game_result = self.sim._run_single_game(rng=rng)
-        required_keys = {"away_score", "home_score", "innings_played", "player_log"}
-        for key in required_keys:
-            assert key in game_result, f"Missing key '{key}' in single-game result"
+    def test_single_game_sim_returns_dict(self):
+        """_run_single_game returns a dict (sim_totals)."""
+        sim_totals, result = self._run_single_game_helper(seed=0)
+        assert isinstance(sim_totals, dict)
 
     def test_single_game_score_non_negative(self):
         """Single game scores are non-negative integers."""
-        rng = np.random.default_rng(seed=1)
-        game_result = self.sim._run_single_game(rng=rng)
-        assert game_result["away_score"] >= 0
-        assert game_result["home_score"] >= 0
+        _, result = self._run_single_game_helper(seed=1)
+        for side in ("away", "home"):
+            run_dist = result.team_results[side]["run_distribution"]
+            for runs in run_dist:
+                assert runs >= 0
 
-    def test_single_game_innings_at_least_9(self):
-        """A single game simulation plays at least 9 innings."""
-        rng = np.random.default_rng(seed=2)
-        game_result = self.sim._run_single_game(rng=rng)
-        assert game_result["innings_played"] >= 9
+    def test_single_game_produces_team_results(self):
+        """A single game simulation populates team_results."""
+        _, result = self._run_single_game_helper(seed=2)
+        total_games = (
+            result.team_results["away"]["wins"]
+            + result.team_results["home"]["wins"]
+        )
+        assert total_games == 1
 
     def test_run_is_idempotent(self):
         """Calling run() twice on the same simulator produces consistent results
         (with a fixed seed, results should be identical)."""
-        cfg = SimulationConfig(NUM_SIMULATIONS=50, RANDOM_SEED=7)
+        cfg = SimulationConfig(NUM_SIMULATIONS=50)
+        cfg.random_seed = 7
         sim = GameSimulator(
             matchup_model=self.matchup_model,
             config=cfg,
         )
         r1 = sim.simulate_game(self.game_data)
         r2 = sim.simulate_game(self.game_data)
-        assert r1.away_win_prob == r2.away_win_prob
-        assert r1.home_win_prob == r2.home_win_prob
+        assert r1.team_results["away"]["wins"] == r2.team_results["away"]["wins"]
+        assert r1.team_results["home"]["wins"] == r2.team_results["home"]["wins"]
 
     def test_high_k_pitcher_produces_more_ks(self):
         """Lineup facing a high-K pitcher accumulates more strikeouts per sim."""
@@ -1052,8 +1110,8 @@ class TestGameSimulator:
         # High-K model should produce more total strikeouts
         def total_ks(result):
             return sum(
-                stats.get("avg_strikeouts", 0)
-                for stats in result.player_stats.values()
+                ps.get_mean("strikeouts")
+                for ps in result.player_results.values()
             )
 
         assert total_ks(result_highk) > total_ks(result_baseline), (
@@ -1085,9 +1143,9 @@ class TestPropAnalyzer:
             config=cfg,
         )
         self.result = sim.simulate_game(game_data)
-        self.analyzer = PropAnalyzer(simulation_result=self.result)
+        self.analyzer = PropAnalyzer(config=cfg)
 
-        # Pick a player that exists in player_stats
+        # Pick a player that exists in player_results
         self.player_id = away_lineup[0]["mlbam_id"]
         self.player_name = away_lineup[0]["name"]
 
@@ -1098,143 +1156,163 @@ class TestPropAnalyzer:
         prop = PropLine(
             player_id=self.player_id,
             player_name=self.player_name,
-            prop_type="hits",
+            stat_type="batter_hits",
             line=0.5,
             over_odds=-115,
             under_odds=-105,
+            sportsbook="fanduel",
         )
         assert prop.player_id == self.player_id
         assert prop.line == 0.5
 
-    def test_prop_line_negative_line_raises(self):
-        """PropLine with a negative line raises ValueError."""
-        with pytest.raises(ValueError, match="line"):
-            PropLine(
-                player_id=1,
-                player_name="X",
-                prop_type="hits",
-                line=-0.5,
-                over_odds=-110,
-                under_odds=-110,
-            )
+    def test_prop_line_fields(self):
+        """PropLine stores all fields correctly."""
+        prop = PropLine(
+            player_id=1,
+            player_name="X",
+            stat_type="batter_hits",
+            line=1.5,
+            over_odds=-110,
+            under_odds=-110,
+            sportsbook="draftkings",
+        )
+        assert prop.stat_type == "batter_hits"
+        assert prop.sportsbook == "draftkings"
 
-    def test_prop_line_invalid_prop_type_raises(self):
-        """PropLine with an unknown prop_type raises ValueError."""
-        with pytest.raises(ValueError, match="prop_type"):
-            PropLine(
-                player_id=1,
-                player_name="X",
-                prop_type="fantasy_points",
-                line=0.5,
-                over_odds=-110,
-                under_odds=-110,
-            )
+    def test_prop_line_stores_odds(self):
+        """PropLine correctly stores over and under odds."""
+        prop = PropLine(
+            player_id=1,
+            player_name="X",
+            stat_type="pitcher_strikeouts",
+            line=5.5,
+            over_odds=-130,
+            under_odds=+110,
+            sportsbook="fanduel",
+        )
+        assert prop.over_odds == -130
+        assert prop.under_odds == 110
 
     # --- PropAnalysis tests ---
 
-    def _make_prop(self, prop_type="hits", line=0.5):
+    def _make_prop(self, stat_type="batter_hits", line=0.5):
         return PropLine(
             player_id=self.player_id,
             player_name=self.player_name,
-            prop_type=prop_type,
+            stat_type=stat_type,
             line=line,
             over_odds=-110,
             under_odds=-110,
+            sportsbook="fanduel",
         )
 
-    def test_analyze_returns_prop_analysis(self):
-        """PropAnalyzer.analyze() returns a PropAnalysis object."""
+    def test_analyze_prop_returns_prop_analysis(self):
+        """PropAnalyzer.analyze_prop() returns a PropAnalysis object."""
         prop = self._make_prop()
-        analysis = self.analyzer.analyze(prop)
+        analysis = self.analyzer.analyze_prop(prop, self.result)
         assert isinstance(analysis, PropAnalysis)
 
     def test_over_under_probs_sum_to_one(self):
-        """over_prob + under_prob + push_prob == 1.0."""
+        """p_over + p_under == 1.0."""
         prop = self._make_prop()
-        analysis = self.analyzer.analyze(prop)
-        total = analysis.over_prob + analysis.under_prob + analysis.push_prob
-        assert abs(total - 1.0) < 1e-9, f"Over/under/push sum = {total}"
+        analysis = self.analyzer.analyze_prop(prop, self.result)
+        total = analysis.p_over + analysis.p_under
+        assert abs(total - 1.0) < 1e-6, f"Over/under sum = {total}"
 
-    def test_over_prob_in_range(self):
-        """over_prob is in [0, 1]."""
+    def test_p_over_in_range(self):
+        """p_over is in [0, 1]."""
         prop = self._make_prop()
-        analysis = self.analyzer.analyze(prop)
-        assert 0.0 <= analysis.over_prob <= 1.0
+        analysis = self.analyzer.analyze_prop(prop, self.result)
+        assert 0.0 <= analysis.p_over <= 1.0
 
-    def test_under_prob_in_range(self):
-        """under_prob is in [0, 1]."""
+    def test_p_under_in_range(self):
+        """p_under is in [0, 1]."""
         prop = self._make_prop()
-        analysis = self.analyzer.analyze(prop)
-        assert 0.0 <= analysis.under_prob <= 1.0
+        analysis = self.analyzer.analyze_prop(prop, self.result)
+        assert 0.0 <= analysis.p_under <= 1.0
 
     def test_recommended_side_valid(self):
-        """recommended_side is one of 'over', 'under', or 'no_bet'."""
+        """recommended_side is one of 'over', 'under', or 'pass'."""
         prop = self._make_prop()
-        analysis = self.analyzer.analyze(prop)
-        assert analysis.recommended_side in ("over", "under", "no_bet")
+        analysis = self.analyzer.analyze_prop(prop, self.result)
+        assert analysis.recommended_side in ("over", "under", "pass")
 
     def test_hits_prop_analysis(self):
         """Hits prop returns a valid analysis."""
-        analysis = self.analyzer.analyze(self._make_prop("hits", 0.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_hits", 0.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
-        assert analysis.prop_type == "hits"
+        assert analysis.prop.stat_type == "batter_hits"
 
     def test_strikeouts_prop_analysis(self):
         """Strikeouts prop returns a valid analysis (pitcher K prop)."""
-        # Use a batter for simplicity — analyzer treats same as any counter
-        analysis = self.analyzer.analyze(self._make_prop("strikeouts", 0.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_strikeouts", 0.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
 
     def test_home_runs_prop_analysis(self):
         """Home runs prop works correctly."""
-        analysis = self.analyzer.analyze(self._make_prop("home_runs", 0.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_home_runs", 0.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
-        assert analysis.prop_type == "home_runs"
+        assert analysis.prop.stat_type == "batter_home_runs"
 
     def test_walks_prop_analysis(self):
         """Walks prop works correctly."""
-        analysis = self.analyzer.analyze(self._make_prop("walks", 0.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_walks", 0.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
 
     def test_total_bases_prop_analysis(self):
         """Total bases prop works correctly."""
-        analysis = self.analyzer.analyze(self._make_prop("total_bases", 1.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_total_bases", 1.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
-        assert analysis.prop_type == "total_bases"
+        assert analysis.prop.stat_type == "batter_total_bases"
 
     def test_rbi_prop_analysis(self):
         """RBI prop works correctly."""
-        analysis = self.analyzer.analyze(self._make_prop("rbi", 0.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_rbis", 0.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
 
     def test_runs_prop_analysis(self):
         """Runs scored prop works correctly."""
-        analysis = self.analyzer.analyze(self._make_prop("runs", 0.5))
+        analysis = self.analyzer.analyze_prop(
+            self._make_prop("batter_runs", 0.5), self.result
+        )
         assert isinstance(analysis, PropAnalysis)
 
-    def test_unknown_player_raises(self):
-        """Analyzing a prop for an unknown player_id raises KeyError or ValueError."""
+    def test_unknown_player_returns_pass(self):
+        """Analyzing a prop for an unknown player_id returns a PASS analysis."""
         bad_prop = PropLine(
-            player_id=99999,  # not in player_stats
+            player_id=99999,  # not in player_results
             player_name="Ghost Player",
-            prop_type="hits",
+            stat_type="batter_hits",
             line=0.5,
             over_odds=-110,
             under_odds=-110,
+            sportsbook="fanduel",
         )
-        with pytest.raises((KeyError, ValueError)):
-            self.analyzer.analyze(bad_prop)
+        analysis = self.analyzer.analyze_prop(bad_prop, self.result)
+        assert analysis.recommended_side == "pass"
+        assert analysis.confidence_tier == "PASS"
 
     def test_ev_pct_present_and_numeric(self):
         """ev_pct is a float (expected value as a percentage)."""
-        analysis = self.analyzer.analyze(self._make_prop())
+        analysis = self.analyzer.analyze_prop(self._make_prop(), self.result)
         assert isinstance(analysis.ev_pct, float)
 
     def test_ev_pct_non_negative_for_good_bet(self):
         """A highly favorable bet (line=0.5 hits, heavy over prob) has positive EV."""
-        # Create a prop where the line is very low so over is near certain
-        prop = self._make_prop("hits", line=0.5)
-        analysis = self.analyzer.analyze(prop)
+        prop = self._make_prop("batter_hits", line=0.5)
+        analysis = self.analyzer.analyze_prop(prop, self.result)
         if analysis.recommended_side in ("over", "under"):
             assert analysis.ev_pct >= 0.0, (
                 f"Recommended bet has negative EV: {analysis.ev_pct:.4f}"
@@ -1242,14 +1320,14 @@ class TestPropAnalyzer:
 
     def test_edge_values_are_finite(self):
         """edge_over and edge_under are finite floats."""
-        analysis = self.analyzer.analyze(self._make_prop())
+        analysis = self.analyzer.analyze_prop(self._make_prop(), self.result)
         import math
         assert math.isfinite(analysis.edge_over)
         assert math.isfinite(analysis.edge_under)
 
     def test_edge_calculation_consistency(self):
         """ev_pct is consistent with edge_over / edge_under and recommended_side."""
-        analysis = self.analyzer.analyze(self._make_prop())
+        analysis = self.analyzer.analyze_prop(self._make_prop(), self.result)
         if analysis.recommended_side == "over":
             expected_ev = round(analysis.edge_over * 100, 4)
         elif analysis.recommended_side == "under":

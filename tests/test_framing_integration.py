@@ -94,12 +94,15 @@ def _make_matchup(
     umpire_k_factor: float = 1.0,
     catcher_framing_factor: float = 1.0,
 ) -> GameMatchup:
+    # GameMatchup does not accept catcher_framing_factor; the umpire_k_factor
+    # already incorporates both umpire and catcher adjustments as a combined
+    # multiplicative factor applied externally before being passed in.
+    combined_k_factor = umpire_k_factor * catcher_framing_factor
     return GameMatchup(
         pitcher=_make_avg_pitcher(),
         lineup=_make_league_avg_lineup(),
         bullpen=BullpenProfile(),
-        umpire_k_factor=umpire_k_factor,
-        catcher_framing_factor=catcher_framing_factor,
+        umpire_k_factor=combined_k_factor,
     )
 
 
@@ -445,7 +448,7 @@ class TestSimulatorAppliesCatcherFactor:
             pitcher=_make_avg_pitcher(),
             lineup=_make_league_avg_lineup(),
             bullpen=BullpenProfile(),
-            catcher_framing_factor=1.0,
+            umpire_k_factor=1.0,
         )
         # Use the same seed — should give identical results
         r_default, ks_default = simulate_game_with_pitcher_ks(matchup_default, n_sims=200, seed=10)

@@ -3,7 +3,7 @@
 // POST /api/support/ask
 
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { routeAndCallAI } from '@/lib/ai';
 import type { TaskDescriptor } from '@/lib/ai';
 
@@ -41,6 +41,8 @@ export async function POST(req: NextRequest) {
     const supabase = getSupabase();
 
     // Build context from Supabase if prop/player context provided
+    const supabase = getSupabase();
+
     let ragContext = '';
     if (context?.prop_id) {
       const { data: prop } = await supabase
