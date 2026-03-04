@@ -74,10 +74,10 @@ export function routeTask(task: TaskDescriptor): RoutingDecision {
     };
   }
 
-  // ── Tier 1 default: User Q&A, explanations, interactive → Haiku 4.5 ─
+    // — Tier 1 default: User Q&A, explanations, interactive → DeepSeek V3.2 —
   return {
-    model: 'haiku-4.5',
-    reason: 'Default interactive task routed to Haiku 4.5 for speed and cost',
+          model: 'deepseek-v3.2',
+          reason: 'Default interactive task routed to DeepSeek V3.2 (Anthropic credits depleted)',
     expected_risk: 'low' as RiskLevel,
   };
 }
