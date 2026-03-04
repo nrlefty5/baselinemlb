@@ -16,9 +16,12 @@ export { routeTask } from './router';
 export { callAI } from './clients';
 export { getPromptConfig, PROMPT_REGISTRY } from './prompts';
 
+const FALLBACK_MODEL = 'deepseek-v3.2' as const;
+
 /**
  * Top-level function: route a task to the right model, look up
  * the prompt config, call the AI, and return the response.
+ * Falls back to DeepSeek V3.2 if primary provider fails.
  *
  * This is the single function your API routes and n8n should call.
  */
@@ -38,22 +41,43 @@ export async function routeAndCallAI(
   const promptId = options?.promptIdOverride || taskTypeToPromptId(task.task_type);
   const promptConfig = getPromptConfig(promptId);
 
-  // 3. Call AI
-  const response = await callAI({
-    model,
-    system_prompt: promptConfig.system_prompt,
-    user_prompt: userPrompt,
-    prompt_id: promptId,
-    temperature: promptConfig.temperature,
-    max_tokens: promptConfig.max_tokens,
-  });
+  // 3. Call AI with fallback
+  let response: AIResponse;
+  let routingReason = routing.reason;
+
+  try {
+    response = await callAI({
+      model,
+      system_prompt: promptConfig.system_prompt,
+      user_prompt: userPrompt,
+      prompt_id: promptId,
+      temperature: promptConfig.temperature,
+      max_tokens: promptConfig.max_tokens,
+    });
+  } catch (primaryError) {
+    // If primary model fails and it's not already DeepSeek, try DeepSeek as fallback
+    if (model !== FALLBACK_MODEL) {
+      console.warn(`[AI] Primary model ${model} failed, falling back to ${FALLBACK_MODEL}:`, primaryError);
+      response = await callAI({
+        model: FALLBACK_MODEL,
+        system_prompt: promptConfig.system_prompt,
+        user_prompt: userPrompt,
+        prompt_id: promptId,
+        temperature: promptConfig.temperature,
+        max_tokens: promptConfig.max_tokens,
+      });
+      routingReason = `[FALLBACK] ${routing.reason} -> ${FALLBACK_MODEL} (primary failed)`;
+    } else {
+      throw primaryError;
+    }
+  }
 
   // 4. Log (fire and forget)
   logAICall(response, task).catch(() => {});
 
   return {
     ...response,
-    routing_reason: routing.reason,
+    routing_reason: routingReason,
   };
 }
 
