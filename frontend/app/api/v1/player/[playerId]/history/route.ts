@@ -2,14 +2,11 @@
 // GET /api/v1/player/[playerId]/history
 // Player's prediction history and accuracy metrics.
 // ============================================================
-
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest } from '../../../../../lib/auth'
 import { type ApiResponse, type PlayerHistory } from '../../../../../lib/types'
 import { getPublicClient } from '../../../../../lib/supabase'
-
 export const dynamic = 'force-dynamic'
-
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ playerId: string }> }
@@ -44,7 +41,7 @@ export async function GET(
       )
     }
 
-    const limit = tier === 'free' ? 10 : tier === 'pro' ? 50 : 200
+    const limit = tier === 'single_a' ? 10 : tier === 'double_a' ? 50 : 200
 
     const { data: picks, error } = await supabase
       .from('picks')
