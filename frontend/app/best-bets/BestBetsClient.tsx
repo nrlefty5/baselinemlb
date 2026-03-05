@@ -25,7 +25,7 @@ interface BestBet {
 
 interface BestBetsClientProps {
   bestBets: BestBet[]
-  subscriptionTier: 'free' | 'pro'
+    subscriptionTier: string
   today: string
   statLabels: Record<string, string>
 }
@@ -196,7 +196,7 @@ export default function BestBetsClient({
   today,
   statLabels,
 }: BestBetsClientProps) {
-  const isPro = subscriptionTier === 'pro'
+    const isPro = subscriptionTier !== 'single_a'
   const FREE_LIMIT = 3
 
   const overBets = bestBets.filter((b) => b.direction === 'OVER')
