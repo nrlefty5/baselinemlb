@@ -2,7 +2,6 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import Link from 'next/link'
-import AskBaselineMLB from '@/components/AskBaselineMLB'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -308,10 +307,14 @@ export default function RootLayout({
               <p className="text-slate-600 text-xs">
                 &copy; {new Date().getFullYear()} BaselineMLB. For entertainment purposes only. Not gambling advice.
               </p>
+                            <p className="text-slate-600 text-xs mt-2">
+                If you or someone you know has a gambling problem, call 1-800-GAMBLER (1-800-426-2537). Must be 21+ to use this service.
+              </p>
               <div className="flex items-center gap-4 text-xs text-slate-600">
                 <Link href="/terms" className="hover:text-slate-400 transition-colors">
                   Terms of Use
-                </Link>
+                                </Link>
+                                
                 <Link href="/privacy" className="hover:text-slate-400 transition-colors">
                   Privacy Policy
                 </Link>
@@ -319,7 +322,7 @@ export default function RootLayout({
             </div>
           </div>
                 </footer>
-          <AskBaselineMLB />
+  
 
       </body>
     </html>
