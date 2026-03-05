@@ -4,7 +4,7 @@ import Link from 'next/link'
 export const metadata: Metadata = {
   title: 'Why BaselineMLB? — Compare MLB Prop Analytics Tools',
   description:
-    'See how BaselineMLB compares to BallparkPal, EV Analytics, Action Network, FanGraphs, and Dimers. Glass-box Monte Carlo simulation at $8/mo vs $10–85/mo competitors.',
+    'See how BaselineMLB compares to BallparkPal, EV Analytics, Action Network, FanGraphs, and Dimers. Glass-box Monte Carlo simulation at $29/mo vs $10–85/mo competitors.',
   keywords: [
     'MLB prop analytics comparison',
     'BallparkPal alternative',
@@ -35,7 +35,7 @@ type Platform = {
 }
 
 const platforms: Platform[] = [
-  { name: 'BaselineMLB', price: '$8/mo', shortName: 'Baseline' },
+  { name: 'BaselineMLB', price: '$29/mo', shortName: 'Baseline' },
   { name: 'BallparkPal', price: '$10/mo', shortName: 'BallparkPal' },
   { name: 'EV Analytics', price: '$85/mo', shortName: 'EV Analytics' },
   { name: 'Action Network', price: '$10/mo', shortName: 'Action Net.' },
@@ -98,9 +98,9 @@ const differentiators = [
   },
   {
     title: 'Aggressive Pricing',
-    subtitle: '$8/mo vs $10–85/mo',
+    subtitle: '$29/mo vs $10–85/mo',
     description:
-      'Competitors charge $10 to $85 per month for less transparency and often fewer features. BaselineMLB Pro starts at $8/mo — the most affordable option with full Monte Carlo distributions, Kelly sizing, SHAP explanations, and confidence grades included.',
+      'Competitors charge $10 to $85 per month for less transparency and often fewer features. BaselineMLB Pro starts at $29/mo — the most affordable option with full Monte Carlo distributions, Kelly sizing, SHAP explanations, and confidence grades included.',
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -163,7 +163,7 @@ export default function ComparePage() {
               href="/subscribe"
               className="bg-green-600 hover:bg-green-500 text-white px-8 py-3 rounded-lg font-semibold text-lg transition-colors"
             >
-              Get Started — $8/mo
+              Get Started — $29/mo
             </Link>
             <Link
               href="/accuracy"
@@ -313,7 +313,7 @@ export default function ComparePage() {
           </h2>
           <p className="text-slate-400 mb-8 max-w-lg mx-auto">
             Start with our free tier — 3 daily edges, full accuracy dashboard access, and complete
-            methodology documentation. Upgrade anytime for $8/mo.
+            methodology documentation. Upgrade anytime for $29/mo.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
