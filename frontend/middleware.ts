@@ -1,9 +1,10 @@
 // ===========================================================
 // Next.js Middleware — BaselineMLB
 // Handles:
-//   1. API v1 CORS headers (for external API consumers)
-//   2. Rate-limit header passthrough
-//   3. Logging of API v1 requests (path + tier from headers)
+//   1. Pre-launch password gate (set SITE_PASSWORD env var to enable)
+//   2. API v1 CORS headers (for external API consumers)
+//   3. Rate-limit header passthrough
+//   4. Logging of API v1 requests (path + tier from headers)
 // ===========================================================
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -18,8 +19,36 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ]
 
+// Paths that bypass password protection
+const PUBLIC_PATHS = [
+  '/api/',           // All API routes (webhooks, subscribe, checkout)
+  '/_next/',         // Next.js assets
+  '/favicon.ico',
+  '/gate',           // The password gate page itself
+]
+
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
+
+  // —— Password Gate ————————————————————————————————————
+  const sitePassword = process.env.SITE_PASSWORD
+  if (sitePassword) {
+    const isPublicPath = PUBLIC_PATHS.some(p => pathname.startsWith(p))
+    if (!isPublicPath) {
+      const authCookie = req.cookies.get('site_auth')?.value
+      if (authCookie !== sitePassword) {
+        // Check if this is a POST to /gate (password submission)
+        if (pathname === '/gate' && req.method === 'POST') {
+          // Let the page handle the POST
+          return NextResponse.next()
+        }
+        // Redirect to gate page
+        const gateUrl = req.nextUrl.clone()
+        gateUrl.pathname = '/gate'
+        return NextResponse.rewrite(gateUrl)
+      }
+    }
+  }
 
   // —— API v1: add CORS headers ——————————————————————————
   if (API_V1_PATTERN.test(pathname)) {
@@ -54,6 +83,6 @@ function corsHeaders(origin: string): Record<string, string> {
 
 export const config = {
   matcher: [
-    '/api/v1/:path*',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 }
