@@ -9,11 +9,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { TIER_DISPLAY, type TierName } from '@/app/lib/tiers';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { getPublicClient } from '@/app/lib/supabase';
 
 export default function PricingClient() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
+    const supabase = getPublicClient();
   const [loading, setLoading] = useState<TierName | null>(null);
 
   async function handleCheckout(plan: TierName) {
