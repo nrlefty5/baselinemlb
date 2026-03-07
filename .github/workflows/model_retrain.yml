@@ -239,7 +239,7 @@ jobs:
               metrics = json.load(f)
 
           cv_mae = metrics['cv_mae']
-          MIN_IMPROVEMENT = float('${{ inputs.min_improvement || "0.02" }}')
+          MIN_IMPROVEMENT = float("${{ inputs.min_improvement || '0.02' }}")
           FORCE_DEPLOY = '${{ inputs.force_deploy }}' == 'true'
 
           baseline_mae = None
