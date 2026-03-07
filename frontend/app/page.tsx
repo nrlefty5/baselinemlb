@@ -12,8 +12,10 @@ const OPENING_DAY = new Date('2026-03-26T16:05:00-04:00')
 
 function getDaysUntilOpeningDay(): number {
   const now = new Date()
-  const diff = OPENING_DAY.getTime() - now.getTime()
-  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const target = new Date(2026, 2, 26) // March 26, 2026
+  const diff = target.getTime() - today.getTime()
+  return Math.max(0, Math.round(diff / (1000 * 60 * 60 * 24)))
 }
 
 async function getTodaysGames() {
