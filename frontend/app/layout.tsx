@@ -154,6 +154,12 @@ export default function RootLayout({
                 Edges
               </Link>
               <Link
+                href="/park-factors"
+                className="text-slate-400 hover:text-slate-100 transition-colors hidden sm:inline"
+              >
+                Park Factors
+              </Link>
+              <Link
                 href="/compare"
                 className="text-slate-400 hover:text-slate-100 transition-colors hidden sm:inline"
               >
@@ -218,6 +224,11 @@ export default function RootLayout({
                   <li>
                     <Link href="/players" className="text-slate-500 hover:text-slate-300 transition-colors">
                       Players
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/park-factors" className="text-slate-500 hover:text-slate-300 transition-colors">
+                      Park Factors
                     </Link>
                   </li>
                   <li>
