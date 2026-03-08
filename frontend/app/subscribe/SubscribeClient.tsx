@@ -6,73 +6,35 @@
 
 import { useState } from 'react'
 
+import { TIER_DISPLAY } from '../lib/tiers'
+
 interface PricingTier {
   name: string
   price: number | null
   description: string
   features: string[]
   cta: string
-  tier: 'free' | 'pro' | 'premium'
+  tier: string
   highlighted: boolean
 }
 
-const TIERS: PricingTier[] = [
-  {
-    name: 'Free',
-    price: 0,
-    description: 'Get started with MLB prop analytics',
-    features: [
-      'Top 3 edges per day',
-      'Grade & direction (Over/Under)',
-      'Basic model accuracy stats',
-      'Daily slate overview',
-    ],
-    cta: 'Get Started',
-    tier: 'free',
-    highlighted: false,
-  },
-  {
-    name: 'Pro',
-    price: 29,
-    description: 'Everything you need to bet smarter',
-    features: [
-      'All edges — full slate every day',
-      'Probability distributions',
-      'SHAP feature attribution',
-      'Kelly criterion sizing',
-      'Daily email digest at 11am ET',
-      'Player prediction history (50 games)',
-      'Backtest accuracy by stat type',
-    ],
-    cta: 'Upgrade to Pro',
-    tier: 'pro',
-    highlighted: true,
-  },
-  {
-    name: 'Premium',
-    price: 49,
-    description: 'Full API access for power users',
-    features: [
-      'Everything in Pro',
-      'REST API access (1,000 req/hr)',
-      'API key management',
-      'CSV export',
-      'Custom alert thresholds',
-      'Player history (200 games)',
-      'Webhook notifications (coming soon)',
-    ],
-    cta: 'Upgrade to Premium',
-    tier: 'premium',
-    highlighted: false,
-  },
-]
+// Map from canonical tiers.ts to subscribe page format
+const TIERS: PricingTier[] = TIER_DISPLAY.filter(t => t.id !== 'single_a').map(t => ({
+  name: t.name,
+  price: t.price,
+  description: t.tagline,
+  features: t.features,
+  cta: t.cta,
+  tier: t.id,
+  highlighted: t.id === 'double_a',
+}))
 
 export default function SubscribeClient() {
   const [loading, setLoading] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  async function handleCheckout(tier: 'pro' | 'premium') {
+  async function handleCheckout(tier: string) {
     if (!email.trim()) {
       setError('Please enter your email address')
       return
@@ -163,7 +125,7 @@ export default function SubscribeClient() {
               ) : (
                 <>
                   <span className="text-3xl font-bold">${tier.price}</span>
-                  <span className="text-slate-400 text-sm">/month</span>
+                  <span className="text-slate-400 text-sm">/mo</span>
                 </>
               )}
             </div>
@@ -179,7 +141,7 @@ export default function SubscribeClient() {
               ))}
             </ul>
 
-            {tier.tier === 'free' ? (
+            {tier.price === 0 ? (
               <button
                 disabled
                 className="w-full py-3 rounded-lg bg-slate-700 text-slate-400 font-medium cursor-not-allowed"
@@ -188,7 +150,7 @@ export default function SubscribeClient() {
               </button>
             ) : (
               <button
-                onClick={() => handleCheckout(tier.tier as 'pro' | 'premium')}
+                onClick={() => handleCheckout(tier.tier)}
                 disabled={loading !== null}
                 className={`w-full py-3 rounded-lg font-medium transition-colors ${
                   tier.highlighted

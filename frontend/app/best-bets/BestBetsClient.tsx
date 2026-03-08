@@ -187,7 +187,7 @@ function PaywallBanner({ totalBets }: { totalBets: number }) {
         href="/pricing"
         className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-medium px-6 py-2.5 rounded-lg transition-colors"
       >
-        Upgrade to Pro — $29/mo
+        Upgrade to Double-A — $7.99/mo
       </Link>
     </div>
   )

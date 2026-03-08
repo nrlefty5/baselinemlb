@@ -82,25 +82,31 @@ function JsonLd() {
     offers: [
       {
         '@type': 'Offer',
-        name: 'Free',
+        name: 'Single-A',
         price: '0',
         priceCurrency: 'USD',
-        description: 'Top 3 edges per day with basic accuracy stats',
+        description: 'Top 3 best bets daily with grade, direction, and edge %',
       },
       {
         '@type': 'Offer',
-        name: 'Pro',
-        price: '29',
+        name: 'Double-A',
+        price: '7.99',
         priceCurrency: 'USD',
-        description:
-          'Full edge access, probability distributions, SHAP explanations, Kelly sizing',
+        description: 'Full daily best bets, edges page, basic SHAP, daily email digest',
       },
       {
         '@type': 'Offer',
-        name: 'Premium',
-        price: '49',
+        name: 'Triple-A',
+        price: '29.99',
         priceCurrency: 'USD',
-        description: 'Everything in Pro plus REST API access and CSV export',
+        description: 'Full SHAP breakdowns, probability distributions, Kelly sizing, simulator',
+      },
+      {
+        '@type': 'Offer',
+        name: 'The Show',
+        price: '49.99',
+        priceCurrency: 'USD',
+        description: 'Everything in Triple-A plus REST API access, CSV export, priority support',
       },
     ],
     creator: {
