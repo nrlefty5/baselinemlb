@@ -21,15 +21,16 @@ const STAT_LABELS: Record<string, string> = {
 
 async function getPlayerData(mlbamId: string) {
   if (!supabaseUrl || !supabaseAnonKey) {
-    return { player: null, projections: [], props: [] }
+    return { player: null, projections: [], props: [], gameLog: [], rollingStats: [] }
   }
   const supabase = createClient(supabaseUrl, supabaseAnonKey)
+  const mlbamInt = parseInt(mlbamId)
 
   // Fetch player info
   const { data: player } = await supabase
     .from('players')
     .select('*')
-    .eq('mlbam_id', parseInt(mlbamId))
+    .eq('mlbam_id', mlbamInt)
     .single()
 
   // Fetch recent projections (last 14 days, all stat types)
@@ -37,7 +38,7 @@ async function getPlayerData(mlbamId: string) {
   const { data: projections } = await supabase
     .from('projections')
     .select('*')
-    .eq('mlbam_id', parseInt(mlbamId))
+    .eq('mlbam_id', mlbamInt)
     .gte('game_date', twoWeeksAgo)
     .order('game_date', { ascending: false })
     .limit(100)
@@ -51,10 +52,31 @@ async function getPlayerData(mlbamId: string) {
     .ilike('player_name', `%${player?.full_name || ''}%`)
     .limit(50)
 
+  // Fetch game log (picks with results for last 30 days)
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+  const { data: gameLog } = await supabase
+    .from('picks')
+    .select('game_date, stat_type, line, projection, edge, direction, grade, result, actual_value')
+    .eq('mlbam_id', mlbamInt)
+    .gte('game_date', thirtyDaysAgo)
+    .order('game_date', { ascending: false })
+    .limit(100)
+
+  // Fetch rolling advanced stats (last 30 days)
+  const { data: rollingStats } = await supabase
+    .from('player_rolling_stats')
+    .select('*')
+    .eq('player_id', mlbamInt)
+    .gte('stat_date', thirtyDaysAgo)
+    .order('stat_date', { ascending: true })
+    .limit(30)
+
   return {
     player: player || null,
     projections: projections || [],
     props: props || [],
+    gameLog: gameLog || [],
+    rollingStats: rollingStats || [],
   }
 }
 
@@ -63,7 +85,7 @@ export default async function PlayerDetailPage({
 }: {
   params: { mlbam_id: string }
 }) {
-  const { player, projections, props } = await getPlayerData(params.mlbam_id)
+  const { player, projections, props, gameLog, rollingStats } = await getPlayerData(params.mlbam_id)
 
   if (!player) {
     return (
@@ -125,7 +147,10 @@ export default async function PlayerDetailPage({
       <PlayerProfileClient
         projections={projections}
         props={props}
+        gameLog={gameLog}
+        rollingStats={rollingStats}
         statLabels={STAT_LABELS}
+        isPitcher={['SP', 'RP', 'P'].includes(player.position || '')}
       />
 
       {/* Model Version */}
