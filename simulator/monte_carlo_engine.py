@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Outcome tokens (ordered for numpy searchsorted vectorisation)
 # ---------------------------------------------------------------------------
-OUTCOMES: list[str] = ["K", "BB", "HBP", "1B", "2B", "3B", "HR", "OUT"]
+OUTCOMES: list[str] = ["K", "BB", "HBP", "1B", "2B", "3B", "HR", "out"]
 
 # Bases as integer flags: 0=empty, 1=runner present
 FIRST = 0
@@ -354,7 +354,7 @@ def _normalise_probs(prob_dict: dict[str, float]) -> dict[str, float]:
             "2B": 0.050,
             "3B": 0.005,
             "HR": 0.035,
-            "OUT": 0.435,
+            "out": 0.435,
         }
         total = 1.0
     return {k: v / total for k, v in full.items()}
@@ -407,7 +407,7 @@ class PlateAppearance:
         "2B": 2,
         "3B": 3,
         "HR": 4,
-        "OUT": 0,
+        "out": 0,
     }
 
     def __init__(self, rng: np.random.Generator) -> None:
@@ -500,7 +500,7 @@ def _advance_runners(
     new_runners = list(runners)
     rbis = 0
 
-    if outcome == "K" or outcome == "OUT":
+    if outcome == "K" or outcome == "out":
         # No runner movement
         pass
 
@@ -786,7 +786,7 @@ class GameSimulator:
                     # Estimate pitches (simplified: K=5, BB=6, HBP=3, hit=4, out=3.5)
                     pitch_est = {
                         "K": 5, "BB": 6, "HBP": 3,
-                        "1B": 4, "2B": 4, "3B": 4, "HR": 4, "OUT": 3,
+                        "1B": 4, "2B": 4, "3B": 4, "HR": 4, "out": 3,
                     }.get(pa_result.outcome, 4)
                     if pitcher_id == home_pitcher_id:
                         p_pc[pitcher_id][sim_idx] += pitch_est
@@ -805,7 +805,7 @@ class GameSimulator:
                         b_k[batter_id][sim_idx] += 1
                         p_k[pitcher_id][sim_idx] += 1
 
-                    if pa_result.outcome == "K" or pa_result.outcome == "OUT":
+                    if pa_result.outcome == "K" or pa_result.outcome == "out":
                         outs += 1
                     else:
                         # Advance runners; check which runner IDs scored
@@ -929,7 +929,7 @@ def _build_demo_game(
     default_probs: dict[str, float] = {
         "K": 0.225, "BB": 0.085, "HBP": 0.010,
         "1B": 0.155, "2B": 0.050, "3B": 0.005,
-        "HR": 0.035, "OUT": 0.435,
+        "HR": 0.035, "out": 0.435,
     }
 
     home_pitcher_probs = {b: dict(default_probs) for b in away_lineup}
@@ -977,7 +977,7 @@ if __name__ == "__main__":
 # ===========================================================================
 # COMPATIBILITY LAYER -- 11-Outcome Model
 # ===========================================================================
-# The existing engine above uses 8 outcomes (with "OUT" as a catch-all).
+# The existing engine above uses 8 outcomes (with "out" as a catch-all).
 # This section adds the 11-outcome vocabulary expected by tests and new code:
 #   K, BB, HBP, 1B, 2B, 3B, HR, flyout, groundout, lineout, popup
 # ===========================================================================
